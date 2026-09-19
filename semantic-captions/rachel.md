@@ -4,7 +4,7 @@ This repo is a frontend-first prototype for a mobile captioning app called Seman
 
 ## Current state
 
-We built the working frontend, added browser microphone access and debug playback, and completed the initial Deepgram path from secure temporary-token creation through live microphone audio streaming. Deepgram transcripts are logged in the browser console for verification but are not displayed in the caption cards yet.
+We built the working frontend and completed the live caption path from browser microphone capture through secure Deepgram transcription and visible caption cards. Interim text updates in place, final text is retained as caption history, and debug playback remains available.
 
 - The app is a Next.js + React + TypeScript frontend prototype.
 - Tailwind CSS styling is working correctly.
@@ -13,9 +13,7 @@ We built the working frontend, added browser microphone access and debug playbac
 - Status indicator toggles between:
   - "Not listening"
   - "Listening..."
-- Caption display shows the mock transcript lines:
-  - Speaker 1: "Hey, are you coming downstairs?"
-  - Speaker 2: "Yeah, give me a second."
+- Caption display starts with an empty-state message and shows real Deepgram transcripts while listening.
 - Large Start Listening / Stop Listening button is present.
 - The button now requests and releases the browser microphone.
 - A temporary Audio Debug section records the existing microphone stream and plays back the latest recording.
@@ -24,8 +22,10 @@ We built the working frontend, added browser microphone access and debug playbac
 - The browser uses only the temporary token to open an authenticated Deepgram WebSocket.
 - Deepgram connection status appears as Disconnected, Connecting, or Connected.
 - The existing MediaRecorder produces 250 ms chunks for both Deepgram streaming and debug playback.
-- Interim and final transcript text is parsed and logged to the browser console.
-- Mock transcript data is preserved.
+- Interim and final transcript text is normalized, logged, and rendered live.
+- One active interim card is replaced as recognition improves instead of producing duplicates.
+- Final captions are retained in a history capped at 100 segments.
+- Caption history automatically scrolls to keep the newest text visible.
 - Reusable React components are preserved.
 - Transcript type remains in place for future integration work.
 
@@ -88,12 +88,27 @@ Before connecting Deepgram, we added a native browser `MediaRecorder` check to p
 - Stop sends the final recorder chunk, finalizes debug playback, sends Deepgram `CloseStream`, releases microphone tracks, and closes the socket.
 - Continuous audio chunks make a separate KeepAlive timer unnecessary for this checkpoint.
 
+## Step 3D — Live caption display
+
+- `web/captions/transcript.ts` converts Deepgram `Results` messages into the app's normalized `Transcript` type.
+- Normalization extracts text, start time, duration/end time, confidence, and `is_final`; empty and unrelated messages are ignored.
+- Speaker attribution remains intentionally fixed at Speaker 1 because diarization is not enabled yet.
+- `web/app/page.tsx` keeps finalized captions and the current interim caption in separate React state.
+- Each interim result replaces the active interim caption rather than appending another card.
+- A final result is appended once, de-duplicated by its segment ID, and clears the matching interim state.
+- Starting a new listening session clears the previous session's captions.
+- Stopping clears unfinished interim text while leaving finalized captions visible.
+- `CaptionDisplay` renders final history followed by the active interim caption and shows an empty state before speech begins.
+- Interim captions use the existing card design with reduced opacity.
+- The caption container automatically scrolls to the bottom as interim text grows or final segments arrive.
+
 ## Important boundaries
 
 - No FastAPI backend yet
 - No Python audio/emotion analysis yet
-- No real transcripts in `CaptionDisplay` yet; Deepgram results are console-only
-- No interim-caption replacement, speaker diarization, or transcript/audio-cue merging yet
+- No speaker diarization or multi-speaker attribution yet
+- No transcript/audio-cue merging yet
+- No database persistence or transcript export
 - No new npm packages were added
 
 ## Verified status
@@ -102,17 +117,21 @@ Before connecting Deepgram, we added a native browser `MediaRecorder` check to p
 - the app is still using the working Step 1 visual structure and styling
 - the temporary-token endpoint returned HTTP 200 with a non-empty 30-second access token during a redacted server test
 - authentication, WebSocket, recording, playback, and streaming use native browser/server APIs only
-- live microphone-to-transcript behavior still needs final manual verification in Chrome and iPhone Safari
+- the live-caption implementation builds successfully and preserves existing audio cleanup and debug playback
+- desktop live transcription has been reported working
+- iPhone Safari microphone capture still needs testing through the HTTPS ngrok URL
 
 ## Known dev-server issues
 
 - stale `.next` output can cause missing chunk/runtime errors
 - running `npm run dev` from the wrong directory causes `ENOENT` errors
 - the correct app folder is `/Users/rachelchen/projects/hack26/semantic-captions/web`
+- iPhone Safari requires the HTTPS ngrok URL; opening the HTTP LAN address makes `getUserMedia` unavailable and produces the browser-support error before a permission prompt
+- Safari MediaRecorder output may differ by iOS version, so the selected MIME type and continuous chunk behavior should be checked during phone testing
 
 ## Next likely step
 
-- verify 250 ms audio chunks and interim/final console transcripts in desktop Chrome
-- verify the selected MediaRecorder format and continuous chunks in iPhone Safari through the existing HTTPS ngrok URL
-- after Step 3C passes on both targets, begin Step 3D by mapping Deepgram results into caption state
-- keep the temporary playback checkpoint until live streaming is validated, then remove or isolate it
+- open the app through the HTTPS ngrok URL on iPhone Safari and allow microphone access
+- verify interim replacement, final-caption de-duplication, auto-scroll, and repeated sessions on desktop and iPhone
+- inspect the selected Safari MediaRecorder MIME type if phone audio or transcription fails
+- keep the temporary playback checkpoint until phone streaming is validated, then remove or isolate it

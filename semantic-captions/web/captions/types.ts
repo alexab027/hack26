@@ -1,17 +1,5 @@
 export type CueCategory = "prosody" | "emotion" | "environment";
 
-export type Transcript = {
-  id: string;
-  text: string;
-  speaker: number;
-  start: number;
-  end: number;
-  confidence: number;
-  final: boolean;
-};
-
-// These compatibility types keep older scaffold files compiling while the app is still
-// intentionally frontend-only and no Deepgram integration has been added yet.
 export type TranscriptSegment = {
   type: "transcript";
   start: number;
@@ -20,6 +8,11 @@ export type TranscriptSegment = {
   speaker?: number;
   confidence: number;
   final: boolean;
+};
+
+export type Transcript = TranscriptSegment & {
+  id: string;
+  speaker: number;
 };
 
 export type AudioCue = {

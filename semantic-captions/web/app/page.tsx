@@ -14,27 +14,7 @@ import { connectToDeepgram, type DeepgramConnection } from "../audio/deepgram";
 
 type DeepgramStatus = "disconnected" | "connecting" | "connected";
 const AUDIO_CHUNK_MS = 250;
-
-const mockTranscripts: Transcript[] = [
-  {
-    id: "1",
-    text: "Hey, are you coming downstairs?",
-    speaker: 1,
-    start: 0,
-    end: 3,
-    confidence: 0.97,
-    final: true,
-  },
-  {
-    id: "2",
-    text: "Yeah, give me a second.",
-    speaker: 2,
-    start: 3,
-    end: 6,
-    confidence: 0.95,
-    final: true,
-  },
-];
+const MAX_FINAL_CAPTIONS = 100;
 
 export default function HomePage() {
   const [isListening, setIsListening] = useState(false);
@@ -51,6 +31,8 @@ export default function HomePage() {
   const [isBusy, setIsBusy] = useState(false);
   const [recording, setRecording] = useState<{ url: string; size: number; mimeType: string } | null>(null);
   const [deepgramStatus, setDeepgramStatus] = useState<DeepgramStatus>("disconnected");
+  const [finalCaptions, setFinalCaptions] = useState<Transcript[]>([]);
+  const [interimCaption, setInterimCaption] = useState<Transcript | null>(null);
 
   const clearRecording = () => {
     audioRef.current?.pause();
@@ -91,6 +73,7 @@ export default function HomePage() {
     connection?.close();
     setDeepgramStatus("disconnected");
     setErrorMessage(message);
+    setInterimCaption(null);
 
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== "inactive") recorder.stop();
@@ -108,6 +91,7 @@ export default function HomePage() {
       setIsBusy(true);
       deepgramAttemptRef.current += 1;
       setDeepgramStatus("disconnected");
+      setInterimCaption(null);
       const recorder = recorderRef.current;
       if (recorder && recorder.state !== "inactive") {
         recorder.stop();
@@ -126,6 +110,8 @@ export default function HomePage() {
     busyRef.current = true;
     setIsBusy(true);
     setErrorMessage(null);
+    setFinalCaptions([]);
+    setInterimCaption(null);
     clearRecording();
     setRecording(null);
     try {
@@ -172,6 +158,7 @@ export default function HomePage() {
         deepgramConnectionRef.current?.close();
         deepgramConnectionRef.current = null;
         setDeepgramStatus("disconnected");
+        setInterimCaption(null);
         stopMicrophone(stream);
         if (recorder.state !== "inactive") recorder.stop();
         if (mountedRef.current) {
@@ -247,6 +234,25 @@ export default function HomePage() {
             `Deepgram disconnected unexpectedly (code ${event.code}).`,
           );
         },
+        onTranscript: (transcript) => {
+          if (!mountedRef.current || deepgramAttemptRef.current !== attempt) return;
+
+          if (transcript.final) {
+            setFinalCaptions((current) => {
+              const existingIndex = current.findIndex((item) => item.id === transcript.id);
+              const next =
+                existingIndex === -1
+                  ? [...current, transcript]
+                  : current.map((item, index) =>
+                      index === existingIndex ? transcript : item,
+                    );
+              return next.slice(-MAX_FINAL_CAPTIONS);
+            });
+            setInterimCaption(null);
+          } else {
+            setInterimCaption(transcript);
+          }
+        },
       });
       deepgramConnectionRef.current = connection;
     } catch (error) {
@@ -254,6 +260,7 @@ export default function HomePage() {
       deepgramConnectionRef.current?.close();
       deepgramConnectionRef.current = null;
       setDeepgramStatus("disconnected");
+      setInterimCaption(null);
       const recorder = recorderRef.current;
       if (recorder && recorder.state !== "inactive") recorder.stop();
       stopMicrophone(microphoneStreamRef.current);
@@ -297,7 +304,10 @@ export default function HomePage() {
         </header>
 
         <section className="flex-1 rounded-3xl border border-slate-700 bg-slate-950/80 p-4">
-          <CaptionDisplay transcripts={mockTranscripts} />
+          <CaptionDisplay
+            transcripts={finalCaptions}
+            interimTranscript={interimCaption}
+          />
         </section>
 
         <div className="px-2 pb-2 pt-5">
