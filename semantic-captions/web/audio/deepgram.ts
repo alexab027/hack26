@@ -1,9 +1,13 @@
+import { normalizeDeepgramTranscript } from "../captions/transcript";
+import type { Transcript } from "../captions/types";
+
 const DEEPGRAM_LIVE_URL = "wss://api.deepgram.com/v1/listen";
 
 export type DeepgramConnectionHandlers = {
   onOpen(): void;
   onError(): void;
   onClose(event: CloseEvent): void;
+  onTranscript(transcript: Transcript): void;
 };
 
 export interface DeepgramConnection {
@@ -19,7 +23,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function handleMessage(event: MessageEvent) {
+function handleMessage(event: MessageEvent, onTranscript: (transcript: Transcript) => void) {
   if (typeof event.data !== "string") return;
 
   let message: unknown;
@@ -33,17 +37,10 @@ function handleMessage(event: MessageEvent) {
   const result = asRecord(message);
   if (!result) return;
 
-  if (result.type === "Results") {
-    const channel = asRecord(result.channel);
-    const alternatives = channel?.alternatives;
-    const firstAlternative = Array.isArray(alternatives) ? asRecord(alternatives[0]) : null;
-    const transcript = firstAlternative?.transcript;
-
-    if (typeof transcript === "string" && transcript.trim()) {
-      console.info(
-        `[Deepgram] ${result.is_final === true ? "final" : "interim"}: ${transcript.trim()}`,
-      );
-    }
+  const transcript = normalizeDeepgramTranscript(result);
+  if (transcript) {
+    console.info(`[Deepgram] ${transcript.final ? "final" : "interim"}: ${transcript.text}`);
+    onTranscript(transcript);
     return;
   }
 
@@ -86,7 +83,7 @@ export function connectToDeepgram(
     handlers.onError();
   });
 
-  socket.addEventListener("message", handleMessage);
+  socket.addEventListener("message", (event) => handleMessage(event, handlers.onTranscript));
 
   socket.addEventListener("close", (event) => {
     if (closeFallback) clearTimeout(closeFallback);
