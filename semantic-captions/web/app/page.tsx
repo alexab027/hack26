@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CaptionDisplay } from "../components/CaptionDisplay";
 import { ListeningButton } from "../components/ListeningButton";
 import { StatusIndicator } from "../components/StatusIndicator";
 import type { Transcript } from "../captions/types";
+import { startMicrophone, stopMicrophone } from "../audio/microphone";
 
 const mockTranscripts: Transcript[] = [
   {
@@ -29,9 +30,38 @@ const mockTranscripts: Transcript[] = [
 
 export default function HomePage() {
   const [isListening, setIsListening] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const microphoneStreamRef = useRef<MediaStream | null>(null);
 
-  const handleToggleListening = () => {
-    setIsListening((current) => !current);
+  useEffect(() => {
+    return () => {
+      stopMicrophone(microphoneStreamRef.current);
+      microphoneStreamRef.current = null;
+    };
+  }, []);
+
+  const handleToggleListening = async () => {
+    if (isListening) {
+      stopMicrophone(microphoneStreamRef.current);
+      microphoneStreamRef.current = null;
+      setIsListening(false);
+      setErrorMessage(null);
+      return;
+    }
+
+    try {
+      const stream = await startMicrophone();
+      microphoneStreamRef.current = stream;
+      setIsListening(true);
+      setErrorMessage(null);
+    } catch (error) {
+      console.error("Microphone access failed:", error);
+      setErrorMessage(
+        error instanceof Error ? error.message : "Microphone access failed. Please try again.",
+      );
+      setIsListening(false);
+      microphoneStreamRef.current = null;
+    }
   };
 
   return (
@@ -40,7 +70,7 @@ export default function HomePage() {
         <header className="px-2 pb-3 pt-2">
           <h1 className="text-3xl font-bold tracking-tight text-white">Semantic Captions</h1>
           <div className="mt-3">
-            <StatusIndicator isListening={isListening} />
+            <StatusIndicator isListening={isListening} errorMessage={errorMessage} />
           </div>
         </header>
 
