@@ -14,6 +14,10 @@ import {
   startCallTranscription,
   type CallTranscriptionSession,
 } from "../../audio/callTranscription";
+import {
+  startCallSemanticAnalysis,
+  type CallSemanticSession,
+} from "../../audio/callSemantic";
 import type { Transcript } from "../../captions/types";
 import { CaptionDisplay } from "../CaptionDisplay";
 
@@ -27,6 +31,7 @@ type ActiveTranscription = {
   trackSid: string;
   controller: AbortController;
   session: CallTranscriptionSession | null;
+  semanticSession: CallSemanticSession | null;
 };
 
 function hasCallerRole(participant: RemoteParticipant): boolean {
@@ -78,6 +83,7 @@ export function HostCallerCaptions() {
       pipelineGenerationRef.current += 1;
       active?.controller.abort();
       active?.session?.stop();
+      active?.semanticSession?.stop();
       active = null;
       if (updateState) {
         setInterimCaption(null);
@@ -102,6 +108,7 @@ export function HostCallerCaptions() {
         trackSid: publication.trackSid,
         controller,
         session: null,
+        semanticSession: null,
       };
       setErrorMessage(null);
 
@@ -109,11 +116,32 @@ export function HostCallerCaptions() {
       console.info("[Call Transcription] Caller microphone subscribed");
       console.info("[Call Transcription] Starting Deepgram");
 
+      const startSemanticSidecar = async () => {
+        try {
+          const semanticSession = await startCallSemanticAnalysis(
+            track,
+            controller.signal,
+          );
+          if (!semanticSession) return;
+
+          if (disposed || active?.generation !== trackGeneration) {
+            semanticSession.stop();
+            return;
+          }
+          active.semanticSession = semanticSession;
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            console.warn("[Call Semantic] unavailable", error);
+          }
+        }
+      };
+
       try {
         const session = await startCallTranscription(track, controller.signal, {
           onStarted: () => {
             if (!disposed && active?.generation === trackGeneration) {
               setStatus("listening");
+              void startSemanticSidecar();
             }
           },
           onTranscript: (transcript) => {

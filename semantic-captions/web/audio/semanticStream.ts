@@ -70,7 +70,11 @@ function waitForSocket(socket: WebSocket): Promise<void> {
   });
 }
 
-/** Prepare a gated PCM branch; `start` establishes the shared session origin. */
+/**
+ * Prepare a gated PCM branch; `start` establishes the shared session origin.
+ * The caller retains ownership of the MediaStream and its tracks. Cleanup only
+ * disconnects Web Audio resources and never calls `stop()` on an input track.
+ */
 export async function prepareSemanticStream(
   stream: MediaStream,
   url: string,
