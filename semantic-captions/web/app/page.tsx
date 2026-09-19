@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { CaptionDisplay } from "../components/CaptionDisplay";
 import { ListeningButton } from "../components/ListeningButton";
 import { StatusIndicator } from "../components/StatusIndicator";
 import type { Transcript } from "../captions/types";
-import { startMicrophoneCapture, stopMicrophone } from "../audio/microphone";
 
 const mockTranscripts: Transcript[] = [
   {
@@ -30,39 +29,9 @@ const mockTranscripts: Transcript[] = [
 
 export default function HomePage() {
   const [isListening, setIsListening] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const microphoneStreamRef = useRef<MediaStream | null>(null);
 
-  useEffect(() => {
-    return () => {
-      stopMicrophone(microphoneStreamRef.current);
-    };
-  }, []);
-
-  const handleToggleListening = async () => {
-    if (isListening) {
-      stopMicrophone(microphoneStreamRef.current);
-      microphoneStreamRef.current = null;
-      setIsListening(false);
-      setErrorMessage(null);
-      return;
-    }
-
-    try {
-      const stream = await startMicrophoneCapture();
-      microphoneStreamRef.current = stream;
-      setIsListening(true);
-      setErrorMessage(null);
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Microphone access failed. Please allow permission and try again.";
-
-      setErrorMessage(message);
-      setIsListening(false);
-      microphoneStreamRef.current = null;
-    }
+  const handleToggleListening = () => {
+    setIsListening((current) => !current);
   };
 
   return (
@@ -71,7 +40,7 @@ export default function HomePage() {
         <header className="px-2 pb-3 pt-2">
           <h1 className="text-3xl font-bold tracking-tight text-white">Semantic Captions</h1>
           <div className="mt-3">
-            <StatusIndicator isListening={isListening} errorMessage={errorMessage} />
+            <StatusIndicator isListening={isListening} />
           </div>
         </header>
 
@@ -80,10 +49,7 @@ export default function HomePage() {
         </section>
 
         <div className="px-2 pb-2 pt-5">
-          <ListeningButton
-            listening={isListening}
-            onToggle={handleToggleListening}
-          />
+          <ListeningButton listening={isListening} onToggle={handleToggleListening} />
         </div>
       </div>
     </main>

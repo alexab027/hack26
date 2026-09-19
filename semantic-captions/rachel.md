@@ -2,35 +2,56 @@
 
 This repo is a frontend-first prototype for a mobile captioning app called Semantic Captions.
 
-## What we have done so far
+## Current restored state
 
-- Set up the project as a Next.js + React + TypeScript app.
-- Added Tailwind CSS for mobile-friendly styling.
-- Built a clean, accessible UI for a captioning screen.
-- Added a header with the title "Semantic Captions".
-- Added a status indicator that toggles between "Not listening" and "Listening...".
-- Added a large Start Listening / Stop Listening button.
-- Created reusable frontend components for:
-  - status
-  - caption display
-  - caption lines
-  - listening button
-- Added mock transcript data to simulate live captions.
-- Kept the interface focused on the caption area and readable phone-sized layout.
-- Implemented browser microphone access using the MediaStream API.
-- Added permission handling so the app can request microphone access and cleanly stop it.
-- Added error handling for permission denial or access failure.
-- Kept the existing mock captions in place while adding real microphone lifecycle logic.
+We rolled back the project to the last known-good Step 1 implementation, before microphone access was added.
+
+- The app is a Next.js + React + TypeScript frontend-only prototype.
+- Tailwind CSS styling is working correctly.
+- The screen matches the original mobile-first Semantic Captions UI.
+- Header: "Semantic Captions"
+- Status indicator toggles between:
+  - "Not listening"
+  - "Listening..."
+- Caption display renders mock transcript lines.
+- Large Start Listening / Stop Listening button is present.
+- Clicking the button only toggles local React state.
+- Mock transcript data is preserved.
+- Reusable React components are preserved.
+- Transcript type is preserved for future integration work.
+
+## Step 2 rollback
+
+We removed the microphone-specific work that was added during Step 2:
+
+- removed browser microphone access code
+- removed `navigator.mediaDevices.getUserMedia()`
+- removed `MediaStream` lifecycle handling
+- removed the microphone helper file
+- removed microphone permission flow and error state
+- restored the button to local-only state toggling
+- preserved the original Step 1 mock caption UI
+- preserved the original Tailwind styling configuration and frontend structure
 
 ## Important boundaries
 
-- No Deepgram integration yet.
-- No FastAPI backend yet.
-- No WebSockets yet.
-- No microphone-to-transcription streaming yet.
-- This is still frontend-only prototype work.
+- No microphone access
+- No `MediaRecorder`
+- No `navigator.mediaDevices.getUserMedia()`
+- No `MediaStream` handling
+- No `microphone.ts`
+- No Deepgram integration
+- No WebSockets
+- No FastAPI/backend integration
+
+## Verified status
+
+- the frontend-only Step 1 behavior is restored
+- the app builds successfully with `npm run build`
+- the app is ready for the next backend/transcription phase without reintroducing the browser microphone implementation
 
 ## Next likely step
 
-- Reuse the same microphone stream for future Deepgram and backend integration.
-- Then add real transcript streaming and merge caption data by timestamps.
+- Keep the working frontend-only interface as the foundation
+- Add backend or transcription integration only after the UI is stable
+- Reintroduce microphone capture only when intentionally starting Step 2 again
