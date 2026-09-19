@@ -1,5 +1,10 @@
-# Minimal API dependencies only; add audio/ML packages after model selection.
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.32,<1.0
 pydantic>=2.10,<3.0
+numpy>=1.26,<3.0
+scipy>=1.12,<2.0
+soundfile>=0.12,<1.0
+python-multipart>=0.0.12,<1.0
+torch>=2.5,<3.0
+transformers>=4.47,<6.0
 

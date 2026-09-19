@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AudioCue(BaseModel):
@@ -15,6 +15,8 @@ class AudioCue(BaseModel):
     label: str
     confidence: float = Field(ge=0, le=1)
 
-
-# TODO: Add incoming audio-window metadata and validation that end >= start.
-
+    @model_validator(mode="after")
+    def validate_interval(self) -> "AudioCue":
+        if self.end <= self.start:
+            raise ValueError("end must be greater than start")
+        return self

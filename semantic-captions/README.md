@@ -46,7 +46,8 @@ The developers can work independently against `shared/event-schema.md`. Coordina
 
 ## Local setup
 
-Prerequisites: Node.js 20+ and Python 3.11+.
+Prerequisites: Node.js 20+ and Python 3.11 or 3.12. The audio classifier
+depends on PyTorch, so avoid using Python 3.14 for the backend environment.
 
 ```bash
 cp .env.example web/.env.local
@@ -59,12 +60,49 @@ npm run dev
 In a second terminal:
 
 ```bash
-cd server
-python -m venv .venv
-# macOS/Linux: source .venv/bin/activate
-# Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-uvicorn main:app --reload
+python -m venv server/.venv
+# macOS/Linux: source server/.venv/bin/activate
+# Windows PowerShell: server\.venv\Scripts\Activate.ps1
+pip install -r server/requirements.txt
+python -m uvicorn server.main:app --reload
+```
+
+The health endpoint is `http://localhost:8000/health`. Model loading is lazy,
+so the server can start before the classifier weights are downloaded.
+
+To test environmental sound detection against a local WAV, FLAC, or OGG clip:
+
+```bash
+python -m server.cli path/to/test.wav
+```
+
+Local recordings can be placed in `server/test_audio/`; its contents are ignored
+by Git. Human-readable validation output is the default:
+
+```powershell
+python -m server.cli server/test_audio/laughter.wav
+```
+
+Use `--json` to print only the final timestamped `AudioCue` events:
+
+```powershell
+python -m server.cli server/test_audio/laughter.wav --json
+```
+
+iPhone Voice Memos are normally M4A files, which libsndfile cannot decode in this
+environment. The CLI uses ffmpeg only for `.m4a` input. On Windows, install it once:
+
+```powershell
+winget install --id Gyan.FFmpeg --exact --source winget
+```
+
+Open a new terminal after installation so `ffmpeg` is available on `PATH`.
+
+The first analysis downloads the pretrained AudioSet AST model (roughly 350 MB).
+The same path is available over HTTP:
+
+```bash
+curl -F "file=@path/to/test.wav" http://localhost:8000/analyze/file
 ```
 
 Keep `DEEPGRAM_API_KEY` server-side. Do not commit `.env` files or downloaded model weights.

@@ -24,10 +24,13 @@ models-cache/
 *.pth
 *.safetensors
 
+# Personal/local recordings used to validate the classifier
+server/test_audio/*
+!server/test_audio/.gitkeep
+
 # Editor and operating-system files
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
 *.swp
-
