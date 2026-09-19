@@ -1,0 +1,5 @@
+# Minimal API dependencies only; add audio/ML packages after model selection.
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.32,<1.0
+pydantic>=2.10,<3.0
+

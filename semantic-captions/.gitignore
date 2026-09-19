@@ -1,0 +1,33 @@
+# Web dependencies and build output
+node_modules/
+.next/
+out/
+
+# Local credentials (keep the documented template)
+.env
+.env.*
+!.env.example
+
+# Python environments, bytecode, and test/tool caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Downloaded model artifacts and ML caches
+models-cache/
+*.onnx
+*.pt
+*.pth
+*.safetensors
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
