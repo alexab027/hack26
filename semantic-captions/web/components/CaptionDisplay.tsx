@@ -7,9 +7,16 @@ import { CaptionLine } from "./CaptionLine";
 type CaptionDisplayProps = {
   transcripts: Transcript[];
   interimTranscript: Transcript | null;
+  speakerLabel?: string;
+  emptyMessage?: string;
 };
 
-export function CaptionDisplay({ transcripts, interimTranscript }: CaptionDisplayProps) {
+export function CaptionDisplay({
+  transcripts,
+  interimTranscript,
+  speakerLabel,
+  emptyMessage = "Captions will appear here when you start listening.",
+}: CaptionDisplayProps) {
   const scrollContainerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -29,15 +36,23 @@ export function CaptionDisplay({ transcripts, interimTranscript }: CaptionDispla
       {hasCaptions ? (
         <>
           {transcripts.map((transcript) => (
-            <CaptionLine key={transcript.id} transcript={transcript} />
+            <CaptionLine
+              key={transcript.id}
+              transcript={transcript}
+              speakerLabel={speakerLabel}
+            />
           ))}
           {interimTranscript ? (
-            <CaptionLine key={interimTranscript.id} transcript={interimTranscript} />
+            <CaptionLine
+              key={interimTranscript.id}
+              transcript={interimTranscript}
+              speakerLabel={speakerLabel}
+            />
           ) : null}
         </>
       ) : (
         <p className="py-10 text-center text-base text-slate-400">
-          Captions will appear here when you start listening.
+          {emptyMessage}
         </p>
       )}
     </section>

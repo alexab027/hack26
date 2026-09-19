@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CaptionDisplay } from "../components/CaptionDisplay";
+import { CallLanding } from "../components/call/CallLanding";
 import { ListeningButton } from "../components/ListeningButton";
+import { ModeSelector, type AppMode } from "../components/ModeSelector";
 import { StatusIndicator } from "../components/StatusIndicator";
 import type { Transcript } from "../captions/types";
 import {
@@ -17,6 +19,7 @@ const AUDIO_CHUNK_MS = 250;
 const MAX_FINAL_CAPTIONS = 100;
 
 export default function HomePage() {
+  const [mode, setMode] = useState<AppMode>("nearby");
   const [isListening, setIsListening] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const microphoneStreamRef = useRef<MediaStream | null>(null);
@@ -295,39 +298,54 @@ export default function HomePage() {
       <div className="flex w-full max-w-md flex-col rounded-[2rem] border border-slate-700 bg-slate-900/90 p-4 shadow-2xl shadow-slate-950/40">
         <header className="px-2 pb-3 pt-2">
           <h1 className="text-3xl font-bold tracking-tight text-white">Semantic Captions</h1>
-          <div className="mt-3">
-            <StatusIndicator isListening={isListening} errorMessage={errorMessage} />
-            <p aria-live="polite" className="mt-2 text-sm text-slate-300">
-              Deepgram: {deepgramStatus === "connecting" ? "Connecting..." : deepgramStatus === "connected" ? "Connected" : "Disconnected"}
-            </p>
+          <div className="mt-4">
+            <ModeSelector
+              mode={mode}
+              onChange={setMode}
+              disabled={isListening || isBusy}
+            />
           </div>
+          {mode === "nearby" ? (
+            <div className="mt-3">
+              <StatusIndicator isListening={isListening} errorMessage={errorMessage} />
+              <p aria-live="polite" className="mt-2 text-sm text-slate-300">
+                Deepgram: {deepgramStatus === "connecting" ? "Connecting..." : deepgramStatus === "connected" ? "Connected" : "Disconnected"}
+              </p>
+            </div>
+          ) : null}
         </header>
 
-        <section className="flex-1 rounded-3xl border border-slate-700 bg-slate-950/80 p-4">
-          <CaptionDisplay
-            transcripts={finalCaptions}
-            interimTranscript={interimCaption}
-          />
-        </section>
+        {mode === "nearby" ? (
+          <>
+            <section className="flex-1 rounded-3xl border border-slate-700 bg-slate-950/80 p-4">
+              <CaptionDisplay
+                transcripts={finalCaptions}
+                interimTranscript={interimCaption}
+              />
+            </section>
 
-        <div className="px-2 pb-2 pt-5">
-          <ListeningButton listening={isListening} onToggle={handleToggleListening} disabled={isBusy} />
-          <section aria-label="Audio Debug" className="mt-4 text-sm text-slate-300">
-            <p className="mb-2">Audio Debug (temporary)</p>
-            <button
-              type="button"
-              disabled={!recording || isListening || isBusy}
-              onClick={playRecording}
-              className="rounded-lg border border-slate-600 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:opacity-40"
-            >
-              Play Recording
-            </button>
-            <p aria-live="polite" className="mt-2">
-              {isBusy ? "Preparing audio…" : recording ? `Recording captured: ${recording.size.toLocaleString()} bytes (${recording.mimeType || "browser default"})` : "Record a few seconds, then stop to play it back."}
-            </p>
-            <audio ref={audioRef} src={recording?.url} onError={() => setErrorMessage("The browser could not decode this recording. Try recording again.")} />
-          </section>
-        </div>
+            <div className="px-2 pb-2 pt-5">
+              <ListeningButton listening={isListening} onToggle={handleToggleListening} disabled={isBusy} />
+              <section aria-label="Audio Debug" className="mt-4 text-sm text-slate-300">
+                <p className="mb-2">Audio Debug (temporary)</p>
+                <button
+                  type="button"
+                  disabled={!recording || isListening || isBusy}
+                  onClick={playRecording}
+                  className="rounded-lg border border-slate-600 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:opacity-40"
+                >
+                  Play Recording
+                </button>
+                <p aria-live="polite" className="mt-2">
+                  {isBusy ? "Preparing audio…" : recording ? `Recording captured: ${recording.size.toLocaleString()} bytes (${recording.mimeType || "browser default"})` : "Record a few seconds, then stop to play it back."}
+                </p>
+                <audio ref={audioRef} src={recording?.url} onError={() => setErrorMessage("The browser could not decode this recording. Try recording again.")} />
+              </section>
+            </div>
+          </>
+        ) : (
+          <CallLanding />
+        )}
       </div>
     </main>
   );
