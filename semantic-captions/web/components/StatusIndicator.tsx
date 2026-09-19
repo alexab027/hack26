@@ -16,10 +16,6 @@ export function StatusIndicator({ isListening, errorMessage }: StatusIndicatorPr
         <span aria-live="polite">{isListening ? "Listening..." : "Not listening"}</span>
       </div>
 
-      {isListening ? (
-        <p className="text-xs text-emerald-300">Microphone active</p>
-      ) : null}
-
       {errorMessage ? (
         <p className="text-xs text-red-300" role="alert">
           {errorMessage}
