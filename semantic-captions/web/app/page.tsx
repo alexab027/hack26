@@ -5,7 +5,15 @@ import { CaptionDisplay } from "../components/CaptionDisplay";
 import { ListeningButton } from "../components/ListeningButton";
 import { StatusIndicator } from "../components/StatusIndicator";
 import type { Transcript } from "../captions/types";
-import { startMicrophone, stopMicrophone } from "../audio/microphone";
+import {
+  getSupportedRecordingMimeType,
+  startMicrophone,
+  stopMicrophone,
+} from "../audio/microphone";
+import { connectToDeepgram, type DeepgramConnection } from "../audio/deepgram";
+
+type DeepgramStatus = "disconnected" | "connecting" | "connected";
+const AUDIO_CHUNK_MS = 250;
 
 const mockTranscripts: Transcript[] = [
   {
@@ -32,14 +40,17 @@ export default function HomePage() {
   const [isListening, setIsListening] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const microphoneStreamRef = useRef<MediaStream | null>(null);
-  // Temporary audio checkpoint: keep whole-file recording out of the streaming layer.
+  // One recorder supplies both live Deepgram chunks and temporary debug playback.
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingUrlRef = useRef<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const deepgramConnectionRef = useRef<DeepgramConnection | null>(null);
+  const deepgramAttemptRef = useRef(0);
   const mountedRef = useRef(false);
   const busyRef = useRef(false);
   const [isBusy, setIsBusy] = useState(false);
   const [recording, setRecording] = useState<{ url: string; size: number; mimeType: string } | null>(null);
+  const [deepgramStatus, setDeepgramStatus] = useState<DeepgramStatus>("disconnected");
 
   const clearRecording = () => {
     audioRef.current?.pause();
@@ -53,6 +64,9 @@ export default function HomePage() {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      deepgramAttemptRef.current += 1;
+      deepgramConnectionRef.current?.close();
+      deepgramConnectionRef.current = null;
       const recorder = recorderRef.current;
       if (recorder) {
         recorder.ondataavailable = null;
@@ -68,13 +82,40 @@ export default function HomePage() {
     };
   }, []);
 
+  const stopAfterDeepgramFailure = (attempt: number, message: string) => {
+    if (!mountedRef.current || deepgramAttemptRef.current !== attempt) return;
+
+    deepgramAttemptRef.current += 1;
+    const connection = deepgramConnectionRef.current;
+    deepgramConnectionRef.current = null;
+    connection?.close();
+    setDeepgramStatus("disconnected");
+    setErrorMessage(message);
+
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    stopMicrophone(microphoneStreamRef.current);
+    microphoneStreamRef.current = null;
+    setIsListening(false);
+    busyRef.current = false;
+    setIsBusy(false);
+  };
+
   const handleToggleListening = async () => {
     if (busyRef.current) return;
     if (isListening) {
       busyRef.current = true;
       setIsBusy(true);
+      deepgramAttemptRef.current += 1;
+      setDeepgramStatus("disconnected");
       const recorder = recorderRef.current;
-      if (recorder && recorder.state !== "inactive") recorder.stop();
+      if (recorder && recorder.state !== "inactive") {
+        recorder.stop();
+      } else {
+        const connection = deepgramConnectionRef.current;
+        deepgramConnectionRef.current = null;
+        connection?.finish();
+      }
       // The final dataavailable event is delivered before onstop assembles the Blob.
       stopMicrophone(microphoneStreamRef.current);
       microphoneStreamRef.current = null;
@@ -101,21 +142,36 @@ export default function HomePage() {
         audioTrackCount: stream.getAudioTracks().length,
         tracks: stream.getAudioTracks().map((track) => ({ enabled: track.enabled, readyState: track.readyState })),
       });
-      // Let Chrome/Safari choose their native format instead of forcing WebM.
-      const recorder = new MediaRecorder(stream);
+      const mimeType = getSupportedRecordingMimeType();
+      if (!mimeType) {
+        throw new Error("This browser does not support a compatible audio recording format.");
+      }
+      const recorder = new MediaRecorder(stream, { mimeType });
       recorderRef.current = recorder;
       const chunks: Blob[] = [];
       let recordingFailed = false;
       recorder.onstart = () => {
-        console.info("[Audio Debug] Recording started", { state: recorder.state, mimeType: recorder.mimeType });
+        console.info("[Audio] recorder started");
+        console.info(`[Audio] MediaRecorder MIME type: ${recorder.mimeType}`);
       };
       recorder.ondataavailable = (event) => {
-        console.info("[Audio Debug] dataavailable", { size: event.data.size, mimeType: event.data.type, state: recorder.state });
-        if (event.data.size > 0) chunks.push(event.data);
+        if (!event.data || event.data.size === 0) return;
+
+        console.info(`[Audio] chunk: ${event.data.size} bytes`);
+        chunks.push(event.data);
+
+        const connection = deepgramConnectionRef.current;
+        if (connection?.socket.readyState === WebSocket.OPEN) {
+          connection.sendAudio(event.data);
+        }
       };
       recorder.onerror = () => {
         recordingFailed = true;
         console.error("[Audio Debug] Recording failed", { state: recorder.state });
+        deepgramAttemptRef.current += 1;
+        deepgramConnectionRef.current?.close();
+        deepgramConnectionRef.current = null;
+        setDeepgramStatus("disconnected");
         stopMicrophone(stream);
         if (recorder.state !== "inactive") recorder.stop();
         if (mountedRef.current) {
@@ -124,6 +180,10 @@ export default function HomePage() {
         }
       };
       recorder.onstop = () => {
+        console.info("[Audio] recorder stopped");
+        const connection = deepgramConnectionRef.current;
+        deepgramConnectionRef.current = null;
+        connection?.finish();
         stopMicrophone(stream);
         if (!mountedRef.current) return;
         microphoneStreamRef.current = null;
@@ -144,10 +204,58 @@ export default function HomePage() {
         recordingUrlRef.current = url;
         setRecording({ url, size: blob.size, mimeType: blob.type });
       };
-      recorder.start(1000);
-      console.info("[Audio Debug] MediaRecorder", { state: recorder.state, mimeType: recorder.mimeType });
       setIsListening(true);
+
+      const attempt = deepgramAttemptRef.current + 1;
+      deepgramAttemptRef.current = attempt;
+      setDeepgramStatus("connecting");
+
+      const tokenResponse = await fetch("/api/deepgram-token", { method: "POST" });
+      const tokenData: unknown = await tokenResponse.json();
+      if (!tokenResponse.ok) {
+        throw new Error("Could not get a temporary Deepgram token.");
+      }
+      if (
+        typeof tokenData !== "object" ||
+        tokenData === null ||
+        !("access_token" in tokenData) ||
+        typeof tokenData.access_token !== "string" ||
+        !tokenData.access_token
+      ) {
+        throw new Error("The token endpoint did not return a temporary access token.");
+      }
+
+      if (!mountedRef.current || deepgramAttemptRef.current !== attempt) return;
+
+      const connection = connectToDeepgram(tokenData.access_token, {
+        onOpen: () => {
+          if (mountedRef.current && deepgramAttemptRef.current === attempt) {
+            setDeepgramStatus("connected");
+            try {
+              recorder.start(AUDIO_CHUNK_MS);
+            } catch {
+              stopAfterDeepgramFailure(attempt, "Could not start audio recording.");
+            }
+          }
+        },
+        onError: () => {
+          stopAfterDeepgramFailure(attempt, "Could not connect to Deepgram.");
+        },
+        onClose: (event) => {
+          stopAfterDeepgramFailure(
+            attempt,
+            `Deepgram disconnected unexpectedly (code ${event.code}).`,
+          );
+        },
+      });
+      deepgramConnectionRef.current = connection;
     } catch (error) {
+      deepgramAttemptRef.current += 1;
+      deepgramConnectionRef.current?.close();
+      deepgramConnectionRef.current = null;
+      setDeepgramStatus("disconnected");
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") recorder.stop();
       stopMicrophone(microphoneStreamRef.current);
       microphoneStreamRef.current = null;
       recorderRef.current = null;
@@ -182,6 +290,9 @@ export default function HomePage() {
           <h1 className="text-3xl font-bold tracking-tight text-white">Semantic Captions</h1>
           <div className="mt-3">
             <StatusIndicator isListening={isListening} errorMessage={errorMessage} />
+            <p aria-live="polite" className="mt-2 text-sm text-slate-300">
+              Deepgram: {deepgramStatus === "connecting" ? "Connecting..." : deepgramStatus === "connected" ? "Connected" : "Disconnected"}
+            </p>
           </div>
         </header>
 

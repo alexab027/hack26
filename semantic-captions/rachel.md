@@ -4,7 +4,7 @@ This repo is a frontend-first prototype for a mobile captioning app called Seman
 
 ## Current state
 
-We built the working Step 1 frontend prototype, implemented Step 2 browser microphone access, and added a temporary recording/playback checkpoint to verify that the microphone stream contains usable audio. The app remains scoped to frontend-only behavior.
+We built the working frontend, added browser microphone access and debug playback, and completed the initial Deepgram path from secure temporary-token creation through live microphone audio streaming. Deepgram transcripts are logged in the browser console for verification but are not displayed in the caption cards yet.
 
 - The app is a Next.js + React + TypeScript frontend prototype.
 - Tailwind CSS styling is working correctly.
@@ -20,6 +20,11 @@ We built the working Step 1 frontend prototype, implemented Step 2 browser micro
 - The button now requests and releases the browser microphone.
 - A temporary Audio Debug section records the existing microphone stream and plays back the latest recording.
 - The browser chooses its supported MediaRecorder format for Chrome/Safari compatibility.
+- A Next.js server route exchanges the permanent Deepgram API key for a temporary access token.
+- The browser uses only the temporary token to open an authenticated Deepgram WebSocket.
+- Deepgram connection status appears as Disconnected, Connecting, or Connected.
+- The existing MediaRecorder produces 250 ms chunks for both Deepgram streaming and debug playback.
+- Interim and final transcript text is parsed and logged to the browser console.
 - Mock transcript data is preserved.
 - Reusable React components are preserved.
 - Transcript type remains in place for future integration work.
@@ -52,20 +57,52 @@ Before connecting Deepgram, we added a native browser `MediaRecorder` check to p
 - Console diagnostics report track state, recorder state, MIME type, chunk sizes, and final Blob size without logging raw audio.
 - This is temporary verification code; the intended product architecture still sends live audio chunks to Deepgram and the Python analysis service.
 
+## Step 3A — Deepgram authentication
+
+- `web/app/api/deepgram-token/route.ts` reads `DEEPGRAM_API_KEY` only on the Next.js server.
+- The route calls `POST https://api.deepgram.com/v1/auth/grant` with server-side authentication.
+- The browser receives only Deepgram's temporary `access_token` and `expires_in` values.
+- `web/.env.local` stores the local permanent key and remains ignored and untracked.
+- `web/.env.example` documents the empty `DEEPGRAM_API_KEY` variable.
+- No `NEXT_PUBLIC_DEEPGRAM_API_KEY` variable exists.
+
+## Step 3B — Authenticated Deepgram connection
+
+- `web/audio/deepgram.ts` owns the live Speech-to-Text WebSocket.
+- The browser connects to `wss://api.deepgram.com/v1/listen` with Nova-3, US English, interim results, and smart formatting.
+- The temporary JWT is sent through the browser WebSocket subprotocol as a Bearer credential; it is never logged or added to the URL.
+- The UI reports Deepgram connection state.
+- Start and Stop support repeated connections and clean socket shutdown.
+- Connection failures stop the partially initialized microphone/recorder session safely.
+
+## Step 3C — Microphone audio streaming checkpoint
+
+- The app still acquires one `MediaStream` and creates one `MediaRecorder`.
+- The recorder selects the first browser-supported container format from WebM/Opus, Ogg/Opus, and MP4/AAC options.
+- Recording begins only after the Deepgram WebSocket is open.
+- `MediaRecorder.start(250)` emits small chunks approximately every 250 ms.
+- Each non-empty Blob is retained for debug playback and sent as binary through the open Deepgram socket.
+- Because MediaRecorder produces containerized audio, the WebSocket URL does not specify `encoding` or `sample_rate`; Deepgram reads those values from the container.
+- Deepgram `Results` messages are parsed safely and non-empty transcripts are logged as interim or final text.
+- Malformed messages and Deepgram errors are handled without logging credentials or raw audio.
+- Stop sends the final recorder chunk, finalizes debug playback, sends Deepgram `CloseStream`, releases microphone tracks, and closes the socket.
+- Continuous audio chunks make a separate KeepAlive timer unnecessary for this checkpoint.
+
 ## Important boundaries
 
-- No Deepgram integration yet
-- No WebSockets yet
 - No FastAPI backend yet
-- No production streaming audio chunk pipeline yet; the only chunk collection is the temporary MediaRecorder checkpoint
-- No transcription yet
+- No Python audio/emotion analysis yet
+- No real transcripts in `CaptionDisplay` yet; Deepgram results are console-only
+- No interim-caption replacement, speaker diarization, or transcript/audio-cue merging yet
 - No new npm packages were added
 
 ## Verified status
 
 - the current app builds successfully with `npm run build`
 - the app is still using the working Step 1 visual structure and styling
-- the temporary recording/playback implementation builds successfully with native browser APIs only
+- the temporary-token endpoint returned HTTP 200 with a non-empty 30-second access token during a redacted server test
+- authentication, WebSocket, recording, playback, and streaming use native browser/server APIs only
+- live microphone-to-transcript behavior still needs final manual verification in Chrome and iPhone Safari
 
 ## Known dev-server issues
 
@@ -75,6 +112,7 @@ Before connecting Deepgram, we added a native browser `MediaRecorder` check to p
 
 ## Next likely step
 
-- validate recording and playback on desktop localhost
-- validate recording and playback in iPhone Safari through the existing HTTPS ngrok URL
-- after the microphone checkpoint passes, remove or isolate the temporary playback UI and intentionally begin the live Deepgram milestone
+- verify 250 ms audio chunks and interim/final console transcripts in desktop Chrome
+- verify the selected MediaRecorder format and continuous chunks in iPhone Safari through the existing HTTPS ngrok URL
+- after Step 3C passes on both targets, begin Step 3D by mapping Deepgram results into caption state
+- keep the temporary playback checkpoint until live streaming is validated, then remove or isolate it
