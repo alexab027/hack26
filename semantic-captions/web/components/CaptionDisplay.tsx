@@ -9,13 +9,17 @@ import { CaptionLine } from "./CaptionLine";
 type CaptionDisplayProps = {
   transcripts: Transcript[];
   interimTranscript: Transcript | null;
-  audioCues: AudioCueData[];
+  audioCues?: AudioCueData[];
+  speakerLabel?: string;
+  emptyMessage?: string;
 };
 
 export function CaptionDisplay({
   transcripts,
   interimTranscript,
-  audioCues,
+  audioCues = [],
+  speakerLabel,
+  emptyMessage = "Captions will appear here when you start listening.",
 }: CaptionDisplayProps) {
   const scrollContainerRef = useRef<HTMLElement | null>(null);
 
@@ -61,6 +65,7 @@ export function CaptionDisplay({
                 key={item.key}
                 transcript={item.caption}
                 cues={item.caption.cues}
+                speakerLabel={speakerLabel}
               />
             ) : (
               <div
@@ -74,7 +79,7 @@ export function CaptionDisplay({
         </>
       ) : (
         <p className="py-10 text-center text-base text-slate-400">
-          Captions will appear here when you start listening.
+          {emptyMessage}
         </p>
       )}
     </section>
