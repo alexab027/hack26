@@ -1,9 +1,16 @@
-import type { MergedCaption } from "../captions/types";
-import { AudioCue } from "./AudioCue";
+import type { Transcript } from "../captions/types";
 
-/** Renders one transcript segment and its timestamp-associated audio cues. */
-export function CaptionLine({ caption }: { caption: MergedCaption }) {
-  // TODO: Define visual treatment for speakers, interim text, and cue confidence.
-  return <p>{caption.cues.map((cue) => <AudioCue key={`${cue.start}-${cue.label}`} cue={cue} />)} {caption.text}</p>;
+type CaptionLineProps = {
+  transcript: Transcript;
+};
+
+export function CaptionLine({ transcript }: CaptionLineProps) {
+  return (
+    <div className="rounded-2xl border border-slate-700 bg-slate-950/70 p-4 shadow-sm">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-sky-300">
+        Speaker {transcript.speaker}
+      </p>
+      <p className="text-2xl leading-relaxed text-white sm:text-[2rem]">{transcript.text}</p>
+    </div>
+  );
 }
-

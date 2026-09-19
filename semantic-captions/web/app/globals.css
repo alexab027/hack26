@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  background-color: #020817;
+}
+
+body {
+  min-height: 100vh;
+  background: linear-gradient(to bottom, #020817, #0f172a);
+  color: #f8fafc;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+}

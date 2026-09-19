@@ -1,7 +1,18 @@
-/** Shared client-side shapes corresponding to the language-neutral event contract. */
 export type CueCategory = "prosody" | "emotion" | "environment";
 
-export interface TranscriptSegment {
+export type Transcript = {
+  id: string;
+  text: string;
+  speaker: number;
+  start: number;
+  end: number;
+  confidence: number;
+  final: boolean;
+};
+
+// These compatibility types keep older scaffold files compiling while the app is still
+// intentionally frontend-only and no Deepgram integration has been added yet.
+export type TranscriptSegment = {
   type: "transcript";
   start: number;
   end: number;
@@ -9,20 +20,17 @@ export interface TranscriptSegment {
   speaker?: number;
   confidence: number;
   final: boolean;
-}
+};
 
-export interface AudioCue {
+export type AudioCue = {
   type: "audio_cue";
   start: number;
   end: number;
   category: CueCategory;
   label: string;
   confidence: number;
-}
+};
 
-export interface MergedCaption extends TranscriptSegment {
+export type MergedCaption = TranscriptSegment & {
   cues: AudioCue[];
-}
-
-// TODO: Add runtime validation at network boundaries so malformed events fail safely.
-
+};
