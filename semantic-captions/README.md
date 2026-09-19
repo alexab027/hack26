@@ -1,6 +1,6 @@
 # Semantic Captions
 
-Semantic Captions is a HackMIT prototype for real-time accessibility captions that pair speech-to-text with vocal delivery and environmental sound cues. This repository is intentionally a documented scaffold: it does not yet connect to Deepgram or run ML inference.
+Semantic Captions is a HackMIT prototype for real-time accessibility captions that pair Deepgram speech-to-text with AST environmental sound cues.
 
 ## Architecture
 
@@ -68,7 +68,10 @@ python -m uvicorn server.main:app --reload
 ```
 
 The health endpoint is `http://localhost:8000/health`. Model loading is lazy,
-so the server can start before the classifier weights are downloaded.
+except for FastAPI startup: the server loads AST and runs one silent two-second
+inference before it begins accepting requests. Wait for `Application startup
+complete` before starting a live caption session. This moves the slow first
+inference out of the microphone session.
 
 To test environmental sound detection against a local WAV, FLAC, or OGG clip:
 
@@ -106,6 +109,16 @@ curl -F "file=@path/to/test.wav" http://localhost:8000/analyze/file
 ```
 
 Keep `DEEPGRAM_API_KEY` server-side. Do not commit `.env` files or downloaded model weights.
+
+Live semantic captions use `NEXT_PUBLIC_BACKEND_WS_URL`. For local development,
+set it to `ws://localhost:8000/ws/analyze` in `web/.env.local`. An HTTPS frontend
+must use a secure `wss://` backend URL because browsers block mixed content.
+
+The browser fans the same microphone stream out to the existing MediaRecorder
+Deepgram connection and an AudioWorklet that sends mono Float32 PCM to FastAPI.
+FastAPI timestamps complete 2-second windows by sample position, advances them
+with a 1-second hop, and runs AST inference in a worker thread. The WebSocket
+endpoint is `/ws/analyze`.
 
 ## Recommended first tasks
 

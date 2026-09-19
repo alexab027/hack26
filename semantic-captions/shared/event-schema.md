@@ -52,5 +52,20 @@ Produced by the backend. Categories distinguish relatively objective prosody fro
 
 A cue is a candidate for a caption when their time intervals overlap. For example, a `voice_trembling` cue from 4.0–6.0 seconds overlaps “I'm fine.” from 4.2–5.8 seconds and can render as `[voice trembling] I'm fine.` Environmental cues with no speech overlap should remain standalone timeline items rather than being discarded.
 
-TODO: agree on session IDs, clock synchronization, audio-window upload messages, overlap thresholds, event versioning, and error/control events before implementing the transport.
+## Live semantic transport
 
+The browser connects to `/ws/analyze` and first sends a text JSON message:
+
+```json
+{"type":"start","sample_rate":48000,"session_id":"browser-generated-id"}
+```
+
+It then sends binary messages containing little-endian mono Float32 PCM. The
+backend derives timestamps from sample positions at the supplied sample rate;
+wall-clock and network arrival times are not used. The client ends a session
+with `{"type":"stop"}`.
+
+The backend sends `AudioCue` objects using the unchanged schema above. It may
+send a later, expanded version of an overlapping cue while that sound
+continues. Clients merge same-label overlapping intervals and retain the
+maximum confidence rather than summing confidence values.

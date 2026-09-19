@@ -29,3 +29,20 @@ def test_sound_model_explicitly_requests_sigmoid_scores() -> None:
     }
     assert predictions[0].label == "Laughter"
     assert predictions[0].score == 0.8
+
+
+def test_sound_model_warmup_runs_a_two_second_production_inference() -> None:
+    classifier = RecordingClassifier()
+    model = SoundModel()
+    model._classifier = classifier
+
+    model.warm_up()
+
+    assert classifier.input["sampling_rate"] == 16_000
+    assert classifier.input["raw"].dtype == np.float32
+    assert classifier.input["raw"].shape == (32_000,)
+    assert np.count_nonzero(classifier.input["raw"]) == 0
+    assert classifier.options == {
+        "top_k": None,
+        "function_to_apply": "sigmoid",
+    }

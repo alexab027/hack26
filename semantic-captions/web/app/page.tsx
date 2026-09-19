@@ -4,17 +4,24 @@ import { useEffect, useRef, useState } from "react";
 import { CaptionDisplay } from "../components/CaptionDisplay";
 import { ListeningButton } from "../components/ListeningButton";
 import { StatusIndicator } from "../components/StatusIndicator";
-import type { Transcript } from "../captions/types";
+import { mergeAudioCue } from "../captions/mergeCues";
+import type { AudioCue, Transcript } from "../captions/types";
 import {
   getSupportedRecordingMimeType,
   startMicrophone,
   stopMicrophone,
 } from "../audio/microphone";
 import { connectToDeepgram, type DeepgramConnection } from "../audio/deepgram";
+import {
+  prepareSemanticStream,
+  type SemanticStream,
+} from "../audio/semanticStream";
 
 type DeepgramStatus = "disconnected" | "connecting" | "connected";
+type SemanticStatus = "disconnected" | "connecting" | "connected" | "unavailable";
 const AUDIO_CHUNK_MS = 250;
 const MAX_FINAL_CAPTIONS = 100;
+const MAX_SEMANTIC_CUES = 200;
 
 export default function HomePage() {
   const [isListening, setIsListening] = useState(false);
@@ -25,14 +32,17 @@ export default function HomePage() {
   const recordingUrlRef = useRef<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const deepgramConnectionRef = useRef<DeepgramConnection | null>(null);
+  const semanticStreamRef = useRef<SemanticStream | null>(null);
   const deepgramAttemptRef = useRef(0);
   const mountedRef = useRef(false);
   const busyRef = useRef(false);
   const [isBusy, setIsBusy] = useState(false);
   const [recording, setRecording] = useState<{ url: string; size: number; mimeType: string } | null>(null);
   const [deepgramStatus, setDeepgramStatus] = useState<DeepgramStatus>("disconnected");
+  const [semanticStatus, setSemanticStatus] = useState<SemanticStatus>("disconnected");
   const [finalCaptions, setFinalCaptions] = useState<Transcript[]>([]);
   const [interimCaption, setInterimCaption] = useState<Transcript | null>(null);
+  const [audioCues, setAudioCues] = useState<AudioCue[]>([]);
 
   const clearRecording = () => {
     audioRef.current?.pause();
@@ -49,6 +59,8 @@ export default function HomePage() {
       deepgramAttemptRef.current += 1;
       deepgramConnectionRef.current?.close();
       deepgramConnectionRef.current = null;
+      semanticStreamRef.current?.close();
+      semanticStreamRef.current = null;
       const recorder = recorderRef.current;
       if (recorder) {
         recorder.ondataavailable = null;
@@ -71,7 +83,10 @@ export default function HomePage() {
     const connection = deepgramConnectionRef.current;
     deepgramConnectionRef.current = null;
     connection?.close();
+    semanticStreamRef.current?.close();
+    semanticStreamRef.current = null;
     setDeepgramStatus("disconnected");
+    setSemanticStatus("disconnected");
     setErrorMessage(message);
     setInterimCaption(null);
 
@@ -91,7 +106,10 @@ export default function HomePage() {
       setIsBusy(true);
       deepgramAttemptRef.current += 1;
       setDeepgramStatus("disconnected");
+      setSemanticStatus("disconnected");
       setInterimCaption(null);
+      semanticStreamRef.current?.stop();
+      semanticStreamRef.current = null;
       const recorder = recorderRef.current;
       if (recorder && recorder.state !== "inactive") {
         recorder.stop();
@@ -99,6 +117,8 @@ export default function HomePage() {
         const connection = deepgramConnectionRef.current;
         deepgramConnectionRef.current = null;
         connection?.finish();
+        busyRef.current = false;
+        setIsBusy(false);
       }
       // The final dataavailable event is delivered before onstop assembles the Blob.
       stopMicrophone(microphoneStreamRef.current);
@@ -112,6 +132,8 @@ export default function HomePage() {
     setErrorMessage(null);
     setFinalCaptions([]);
     setInterimCaption(null);
+    setAudioCues([]);
+    setSemanticStatus("connecting");
     clearRecording();
     setRecording(null);
     try {
@@ -124,6 +146,8 @@ export default function HomePage() {
         return;
       }
       microphoneStreamRef.current = stream;
+      const attempt = deepgramAttemptRef.current + 1;
+      deepgramAttemptRef.current = attempt;
       console.info("[Audio Debug] Microphone stream acquired", {
         audioTrackCount: stream.getAudioTracks().length,
         tracks: stream.getAudioTracks().map((track) => ({ enabled: track.enabled, readyState: track.readyState })),
@@ -157,7 +181,10 @@ export default function HomePage() {
         deepgramAttemptRef.current += 1;
         deepgramConnectionRef.current?.close();
         deepgramConnectionRef.current = null;
+        semanticStreamRef.current?.close();
+        semanticStreamRef.current = null;
         setDeepgramStatus("disconnected");
+        setSemanticStatus("disconnected");
         setInterimCaption(null);
         stopMicrophone(stream);
         if (recorder.state !== "inactive") recorder.stop();
@@ -168,6 +195,9 @@ export default function HomePage() {
       };
       recorder.onstop = () => {
         console.info("[Audio] recorder stopped");
+        semanticStreamRef.current?.stop();
+        semanticStreamRef.current = null;
+        setSemanticStatus("disconnected");
         const connection = deepgramConnectionRef.current;
         deepgramConnectionRef.current = null;
         connection?.finish();
@@ -191,10 +221,42 @@ export default function HomePage() {
         recordingUrlRef.current = url;
         setRecording({ url, size: blob.size, mimeType: blob.type });
       };
+
+      const semanticUrl = process.env.NEXT_PUBLIC_BACKEND_WS_URL ?? "";
+      const semanticPreparation = prepareSemanticStream(stream, semanticUrl, {
+        onCue: (cue) => {
+          if (!mountedRef.current || deepgramAttemptRef.current !== attempt) return;
+          setSemanticStatus("connected");
+          setAudioCues((current) =>
+            mergeAudioCue(current, cue).slice(-MAX_SEMANTIC_CUES),
+          );
+        },
+        onWarning: (message) => {
+          if (!mountedRef.current || deepgramAttemptRef.current !== attempt) return;
+          console.warn(`[Semantic] ${message}`);
+          setSemanticStatus("unavailable");
+        },
+      })
+        .then((semanticStream) => {
+          if (!mountedRef.current || deepgramAttemptRef.current !== attempt) {
+            semanticStream.close();
+            return null;
+          }
+          semanticStreamRef.current = semanticStream;
+          return semanticStream;
+        })
+        .catch((error: unknown) => {
+          console.warn(
+            "[Semantic] live sound labels are unavailable; transcription will continue",
+            error,
+          );
+          if (mountedRef.current && deepgramAttemptRef.current === attempt) {
+            setSemanticStatus("unavailable");
+          }
+          return null;
+        });
       setIsListening(true);
 
-      const attempt = deepgramAttemptRef.current + 1;
-      deepgramAttemptRef.current = attempt;
       setDeepgramStatus("connecting");
 
       const tokenResponse = await fetch("/api/deepgram-token", { method: "POST" });
@@ -218,11 +280,35 @@ export default function HomePage() {
         onOpen: () => {
           if (mountedRef.current && deepgramAttemptRef.current === attempt) {
             setDeepgramStatus("connected");
-            try {
-              recorder.start(AUDIO_CHUNK_MS);
-            } catch {
-              stopAfterDeepgramFailure(attempt, "Could not start audio recording.");
-            }
+            void semanticPreparation.then((semanticStream) => {
+              if (!mountedRef.current || deepgramAttemptRef.current !== attempt) {
+                semanticStream?.close();
+                return;
+              }
+              if (semanticStream) {
+                try {
+                  const sessionId =
+                    typeof globalThis.crypto?.randomUUID === "function"
+                      ? globalThis.crypto.randomUUID()
+                      : `semantic-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                  semanticStream.start(sessionId);
+                  setSemanticStatus("connected");
+                } catch (error) {
+                  console.warn(
+                    "[Semantic] could not start live sound labels; transcription will continue",
+                    error,
+                  );
+                  semanticStream.close();
+                  semanticStreamRef.current = null;
+                  setSemanticStatus("unavailable");
+                }
+              }
+              try {
+                recorder.start(AUDIO_CHUNK_MS);
+              } catch {
+                stopAfterDeepgramFailure(attempt, "Could not start audio recording.");
+              }
+            });
           }
         },
         onError: () => {
@@ -259,7 +345,10 @@ export default function HomePage() {
       deepgramAttemptRef.current += 1;
       deepgramConnectionRef.current?.close();
       deepgramConnectionRef.current = null;
+      semanticStreamRef.current?.close();
+      semanticStreamRef.current = null;
       setDeepgramStatus("disconnected");
+      setSemanticStatus("disconnected");
       setInterimCaption(null);
       const recorder = recorderRef.current;
       if (recorder && recorder.state !== "inactive") recorder.stop();
@@ -300,6 +389,9 @@ export default function HomePage() {
             <p aria-live="polite" className="mt-2 text-sm text-slate-300">
               Deepgram: {deepgramStatus === "connecting" ? "Connecting..." : deepgramStatus === "connected" ? "Connected" : "Disconnected"}
             </p>
+            <p aria-live="polite" className="mt-1 text-sm text-slate-300">
+              Sound labels: {semanticStatus === "connecting" ? "Connecting..." : semanticStatus === "connected" ? "Connected" : semanticStatus === "unavailable" ? "Unavailable (captions still active)" : "Disconnected"}
+            </p>
           </div>
         </header>
 
@@ -307,6 +399,7 @@ export default function HomePage() {
           <CaptionDisplay
             transcripts={finalCaptions}
             interimTranscript={interimCaption}
+            audioCues={audioCues}
           />
         </section>
 

@@ -7,6 +7,8 @@ import numpy as np
 
 
 DEFAULT_MODEL_ID = "MIT/ast-finetuned-audioset-10-10-0.4593"
+WARMUP_SECONDS = 2.0
+WARMUP_SAMPLE_RATE = 16_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,7 +18,7 @@ class SoundPrediction:
 
 
 class SoundModel:
-    """Load the model on first inference so health checks remain lightweight."""
+    """Load lazily for CLI use, with an explicit server-startup warm-up path."""
 
     def __init__(self, model_id: str = DEFAULT_MODEL_ID) -> None:
         self.model_id = model_id
@@ -50,3 +52,10 @@ class SoundModel:
             SoundPrediction(label=item["label"], score=float(item["score"]))
             for item in results
         ]
+
+    def warm_up(self) -> None:
+        """Load AST and run one production-shaped inference before live sessions."""
+        silent_window = np.zeros(
+            round(WARMUP_SECONDS * WARMUP_SAMPLE_RATE), dtype=np.float32
+        )
+        self.predict(silent_window, WARMUP_SAMPLE_RATE)
