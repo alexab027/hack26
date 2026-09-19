@@ -1,45 +1,55 @@
-# Semantic Captions Backend Progress
+# Semantic Captions Progress
 
 ## Completed
 
-- Installed Python 3.11 and created the local `server/.venv` environment.
+- Set up Python 3.11 and the local `server/.venv` environment.
 - Added audio loading, mono conversion, normalization, and 16 kHz resampling.
-- Added 2-second timestamped audio windows with a 1-second hop.
-- Integrated `MIT/ast-finetuned-audioset-10-10-0.4593` for AudioSet classification.
-- Switched AudioSet scoring from softmax to independent sigmoid scores.
-- Added centralized semantic alias groups that use the strongest raw score.
-- Added confidence filtering and duplicate merging for overlapping detections.
-- Added `POST /analyze/file` while keeping model loading lazy.
-- Added WAV/FLAC/OGG loading and an ffmpeg fallback for iPhone M4A recordings.
-- Added CLI debug output plus clean timestamped JSON output with `--json`.
-- Added a Git-ignored `server/test_audio/` directory for local recordings.
+- Added 2-second timestamped windows with a 1-second hop.
+- Integrated `MIT/ast-finetuned-audioset-10-10-0.4593` with sigmoid scoring.
+- Added centralized semantic aliases, 0.15 confidence filtering, and
+  max-confidence merging for overlapping detections.
+- Added saved-recording CLI/JSON validation and iPhone M4A support via ffmpeg.
+- Added live mono Float32 PCM streaming from a browser AudioWorklet to FastAPI
+  at `/ws/analyze`, using the same microphone stream as Deepgram.
+- Added bounded, non-blocking live inference with sample-position timestamps.
+- Added React cue merging and rendering before overlapping transcripts or as
+  standalone cards when no speech overlaps.
+- Kept Deepgram working if semantic analysis is unavailable or falls behind.
+- Added a silent 2-second AST warm-up during FastAPI startup so model startup
+  does not delay the first live sound event.
 
 ## Semantic Cues
 
-The backend now maps vocal sounds such as shouting, whispering, laughter, crying,
-coughing, breathing, and sneezing, plus environmental sounds such as horns,
-sirens, knocking, phone ringing, dog barking, applause, chatter, and background music.
-Mappings use exact labels verified from the checkpoint's `id2label` configuration.
-Related laughter labels are grouped into one user-facing `laughter` cue without
-summing correlated scores.
+The backend maps vocal sounds such as laughter, coughing, shouting, crying,
+breathing, and sneezing, plus environmental sounds such as horns, sirens,
+knocking, phone ringing, dog barking, applause, chatter, and background music.
+Exact checkpoint labels are grouped into user-facing cues using the strongest
+raw score rather than summed confidence.
 
 ## Validation
 
-- 42 tests pass without downloading the model or using the network.
-- Model loading and inference were smoke-tested successfully.
-- A silent WAV correctly returned no semantic cues.
-- A real iPhone laughter recording produced a merged `laughter` cue from 5–8 seconds.
+- 49 backend tests pass with protocol/model behavior tested offline.
+- Frontend TypeScript checks and the production Next.js build pass.
+- A real iPhone laughter recording produced a merged `laughter` cue at 5-8 seconds.
+- Live Deepgram captions and semantic labels now work together.
+- Expected live delay is the 2-second window plus local AST inference time.
 
 ## Run Locally
 
+From the repository root:
+
 ```powershell
-server\.venv\Scripts\Activate.ps1
-python -m uvicorn server.main:app --reload
-python -m server.cli server\test_audio\laughter.m4a
-python -m server.cli server\test_audio\laughter.m4a --json
+.\server\.venv\Scripts\python.exe -m uvicorn server.main:app --reload --port 8000
+```
+
+Wait for `Application startup complete`, then in a second terminal:
+
+```powershell
+cd web
+npm.cmd run dev
 ```
 
 ## Next Step
 
-Validate the unchanged confidence threshold across more real recordings, then
-connect browser microphone audio to the backend pipeline.
+Validate more real laughter, cough, and environmental recordings before tuning
+the unchanged threshold or changing the analysis windows.
