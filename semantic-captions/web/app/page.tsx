@@ -24,12 +24,9 @@ import {
 import {
   startHumeExpressionAnalysis,
   type HumeExpressionSession,
-  type HumeStatus,
 } from "../audio/humeExpression";
 import type { HumeExpressionAlert } from "../emotion/humeAlerts";
 
-type DeepgramStatus = "disconnected" | "connecting" | "connected";
-type SemanticStatus = "disconnected" | "connecting" | "connected" | "unavailable";
 const AUDIO_CHUNK_MS = 250;
 const MAX_FINAL_CAPTIONS = 100;
 const MAX_SEMANTIC_CUES = 200;
@@ -42,10 +39,7 @@ export default function HomePage() {
   const [isListening, setIsListening] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const microphoneStreamRef = useRef<MediaStream | null>(null);
-  // One recorder supplies both live Deepgram chunks and temporary debug playback.
   const recorderRef = useRef<MediaRecorder | null>(null);
-  const recordingUrlRef = useRef<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const deepgramConnectionRef = useRef<DeepgramConnection | null>(null);
   const semanticStreamRef = useRef<SemanticStream | null>(null);
   const emotionAlertTimersRef = useRef<number[]>([]);
@@ -55,23 +49,11 @@ export default function HomePage() {
   const mountedRef = useRef(false);
   const busyRef = useRef(false);
   const [isBusy, setIsBusy] = useState(false);
-  const [recording, setRecording] = useState<{ url: string; size: number; mimeType: string } | null>(null);
-  const [deepgramStatus, setDeepgramStatus] = useState<DeepgramStatus>("disconnected");
-  const [semanticStatus, setSemanticStatus] = useState<SemanticStatus>("disconnected");
   const [finalCaptions, setFinalCaptions] = useState<Transcript[]>([]);
   const [interimCaptions, setInterimCaptions] = useState<Transcript[]>([]);
   const [audioCues, setAudioCues] = useState<AudioCue[]>([]);
   const [emotionAlerts, setEmotionAlerts] = useState<AudioCue[]>([]);
-  const [humeStatus, setHumeStatus] = useState<HumeStatus>("disconnected");
   const [humeAlert, setHumeAlert] = useState<HumeExpressionAlert | null>(null);
-
-  const clearRecording = () => {
-    audioRef.current?.pause();
-    audioRef.current?.removeAttribute("src");
-    audioRef.current?.load();
-    if (recordingUrlRef.current) URL.revokeObjectURL(recordingUrlRef.current);
-    recordingUrlRef.current = null;
-  };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -101,7 +83,6 @@ export default function HomePage() {
       recorderRef.current = null;
       stopMicrophone(microphoneStreamRef.current);
       microphoneStreamRef.current = null;
-      clearRecording();
     };
   }, []);
 
@@ -116,14 +97,11 @@ export default function HomePage() {
     semanticStreamRef.current = null;
     humeSessionRef.current?.stop();
     humeSessionRef.current = null;
-    setHumeStatus("disconnected");
     setHumeAlert(null);
     if (humeAlertTimerRef.current !== null) {
       window.clearTimeout(humeAlertTimerRef.current);
       humeAlertTimerRef.current = null;
     }
-    setDeepgramStatus("disconnected");
-    setSemanticStatus("disconnected");
     setErrorMessage(message);
     setInterimCaptions([]);
     setEmotionAlerts([]);
@@ -145,15 +123,12 @@ export default function HomePage() {
       busyRef.current = true;
       setIsBusy(true);
       deepgramAttemptRef.current += 1;
-      setDeepgramStatus("disconnected");
-      setSemanticStatus("disconnected");
       setInterimCaptions([]);
       setEmotionAlerts([]);
       for (const timer of emotionAlertTimersRef.current) window.clearTimeout(timer);
       emotionAlertTimersRef.current = [];
       humeSessionRef.current?.stop();
       humeSessionRef.current = null;
-      setHumeStatus("disconnected");
       setHumeAlert(null);
       if (humeAlertTimerRef.current !== null) {
         window.clearTimeout(humeAlertTimerRef.current);
@@ -187,15 +162,11 @@ export default function HomePage() {
     setEmotionAlerts([]);
     for (const timer of emotionAlertTimersRef.current) window.clearTimeout(timer);
     emotionAlertTimersRef.current = [];
-    setHumeStatus("connecting");
     setHumeAlert(null);
     if (humeAlertTimerRef.current !== null) {
       window.clearTimeout(humeAlertTimerRef.current);
       humeAlertTimerRef.current = null;
     }
-    setSemanticStatus("connecting");
-    clearRecording();
-    setRecording(null);
     try {
       if (typeof MediaRecorder === "undefined") {
         throw new Error("This browser does not support debug audio recording.");
@@ -218,8 +189,6 @@ export default function HomePage() {
       }
       const recorder = new MediaRecorder(stream, { mimeType });
       recorderRef.current = recorder;
-      const chunks: Blob[] = [];
-      let recordingFailed = false;
       recorder.onstart = () => {
         console.info("[Audio] recorder started");
         console.info(`[Audio] MediaRecorder MIME type: ${recorder.mimeType}`);
@@ -228,7 +197,6 @@ export default function HomePage() {
         if (!event.data || event.data.size === 0) return;
 
         console.info(`[Audio] chunk: ${event.data.size} bytes`);
-        chunks.push(event.data);
 
         const connection = deepgramConnectionRef.current;
         if (connection?.socket.readyState === WebSocket.OPEN) {
@@ -236,7 +204,6 @@ export default function HomePage() {
         }
       };
       recorder.onerror = () => {
-        recordingFailed = true;
         console.error("[Audio Debug] Recording failed", { state: recorder.state });
         deepgramAttemptRef.current += 1;
         deepgramConnectionRef.current?.close();
@@ -245,9 +212,6 @@ export default function HomePage() {
         semanticStreamRef.current = null;
         humeSessionRef.current?.stop();
         humeSessionRef.current = null;
-        setHumeStatus("disconnected");
-        setDeepgramStatus("disconnected");
-        setSemanticStatus("disconnected");
         setInterimCaptions([]);
         stopMicrophone(stream);
         if (recorder.state !== "inactive") recorder.stop();
@@ -262,8 +226,6 @@ export default function HomePage() {
         semanticStreamRef.current = null;
         humeSessionRef.current?.stop();
         humeSessionRef.current = null;
-        setHumeStatus("disconnected");
-        setSemanticStatus("disconnected");
         const connection = deepgramConnectionRef.current;
         deepgramConnectionRef.current = null;
         connection?.finish();
@@ -274,25 +236,12 @@ export default function HomePage() {
         busyRef.current = false;
         setIsBusy(false);
         setIsListening(false);
-        const blob = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "" });
-        chunks.length = 0;
-        console.info("[Audio Debug] Recording stopped", { state: recorder.state, size: blob.size, mimeType: blob.type });
-        if (recordingFailed) return;
-        if (blob.size === 0) {
-          console.error("[Audio Debug] Final Blob is 0 bytes; no usable audio captured.");
-          setErrorMessage("Recording is empty (0 bytes). Try recording again and speak for a few seconds.");
-          return;
-        }
-        const url = URL.createObjectURL(blob);
-        recordingUrlRef.current = url;
-        setRecording({ url, size: blob.size, mimeType: blob.type });
       };
 
       const semanticUrl = process.env.NEXT_PUBLIC_BACKEND_WS_URL ?? "";
       const semanticPreparation = prepareSemanticStream(stream, semanticUrl, {
         onCue: (cue) => {
           if (!mountedRef.current || deepgramAttemptRef.current !== attempt) return;
-          setSemanticStatus("connected");
           if (cue.category === "emotion") {
             const cueKey = `${cue.label}-${cue.start}-${cue.end}`;
             setEmotionAlerts((current) =>
@@ -322,7 +271,6 @@ export default function HomePage() {
         onWarning: (message) => {
           if (!mountedRef.current || deepgramAttemptRef.current !== attempt) return;
           console.warn(`[Semantic] ${message}`);
-          setSemanticStatus("unavailable");
         },
       })
         .then((semanticStream) => {
@@ -338,17 +286,10 @@ export default function HomePage() {
             "[Semantic] live sound labels are unavailable; transcription will continue",
             error,
           );
-          if (mountedRef.current && deepgramAttemptRef.current === attempt) {
-            setSemanticStatus("unavailable");
-          }
           return null;
         });
       void startHumeExpressionAnalysis(stream, {
-        onStatus: (status) => {
-          if (mountedRef.current && deepgramAttemptRef.current === attempt) {
-            setHumeStatus(status);
-          }
-        },
+        onStatus: () => {},
         onAlert: (alert) => {
           if (!mountedRef.current || deepgramAttemptRef.current !== attempt) return;
           if (humeAlertTimerRef.current !== null) {
@@ -375,13 +316,8 @@ export default function HomePage() {
           console.warn(
             `[Hume] unavailable: ${error instanceof Error ? error.message : "unknown error"}`,
           );
-          if (mountedRef.current && deepgramAttemptRef.current === attempt) {
-            setHumeStatus("unavailable");
-          }
         });
       setIsListening(true);
-
-      setDeepgramStatus("connecting");
 
       const tokenResponse = await fetch("/api/deepgram-token", { method: "POST" });
       const tokenData: unknown = await tokenResponse.json();
@@ -403,7 +339,6 @@ export default function HomePage() {
       const connection = connectToDeepgram(tokenData.access_token, {
         onOpen: () => {
           if (mountedRef.current && deepgramAttemptRef.current === attempt) {
-            setDeepgramStatus("connected");
             void semanticPreparation.then((semanticStream) => {
               if (!mountedRef.current || deepgramAttemptRef.current !== attempt) {
                 semanticStream?.close();
@@ -418,7 +353,6 @@ export default function HomePage() {
                   semanticStream.start(sessionId, {
                     enableVolume: true,
                   });
-                  setSemanticStatus("connected");
                 } catch (error) {
                   console.warn(
                     "[Semantic] could not start live sound labels; transcription will continue",
@@ -426,7 +360,6 @@ export default function HomePage() {
                   );
                   semanticStream.close();
                   semanticStreamRef.current = null;
-                  setSemanticStatus("unavailable");
                 }
               }
               try {
@@ -474,9 +407,6 @@ export default function HomePage() {
       semanticStreamRef.current = null;
       humeSessionRef.current?.stop();
       humeSessionRef.current = null;
-      setHumeStatus("disconnected");
-      setDeepgramStatus("disconnected");
-      setSemanticStatus("disconnected");
       setInterimCaptions([]);
       setEmotionAlerts([]);
       for (const timer of emotionAlertTimersRef.current) window.clearTimeout(timer);
@@ -498,18 +428,6 @@ export default function HomePage() {
     }
   };
 
-  const playRecording = async () => {
-    const audio = audioRef.current;
-    if (!audio || !recording) return;
-    setErrorMessage(null);
-    try {
-      audio.currentTime = 0;
-      await audio.play();
-    } catch {
-      if (mountedRef.current) setErrorMessage("Could not play the recording. Try recording again.");
-    }
-  };
-
   return (
     <main className="flex min-h-screen items-stretch justify-center sm:items-center sm:px-4 sm:py-8">
       <div className="app-shell">
@@ -525,17 +443,6 @@ export default function HomePage() {
           {mode === "nearby" ? (
             <div className="mt-4">
               <StatusIndicator isListening={isListening} errorMessage={errorMessage} />
-              <p aria-live="polite" className="mt-2 text-[0.6875rem] text-[var(--text-muted)]">
-                Deepgram: {deepgramStatus === "connecting" ? "Connecting..." : deepgramStatus === "connected" ? "Connected" : "Disconnected"}
-              </p>
-              <p aria-live="polite" className="mt-0.5 text-[0.6875rem] text-[var(--text-muted)]">
-                Sound labels: {semanticStatus === "connecting" ? "Connecting..." : semanticStatus === "connected" ? "Connected" : semanticStatus === "unavailable" ? "Unavailable (captions still active)" : "Disconnected"}
-              </p>
-              {process.env.NODE_ENV !== "production" ? (
-                <p aria-live="polite" className="mt-1 text-sm text-slate-300">
-                  Hume: {humeStatus}
-                </p>
-              ) : null}
             </div>
           ) : null}
         </header>
@@ -554,25 +461,6 @@ export default function HomePage() {
 
             <div className="pb-1 pt-4">
               <ListeningButton listening={isListening} onToggle={handleToggleListening} disabled={isBusy} />
-              <details className="mt-4 border-t border-[var(--border-soft)] pt-3 text-sm text-[var(--text-secondary)]">
-                <summary className="min-h-11 cursor-pointer select-none py-3 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]">
-                  Developer tools
-                </summary>
-                <section aria-label="Audio Debug" className="pb-2 pt-2">
-                  <button
-                    type="button"
-                    disabled={!recording || isListening || isBusy}
-                    onClick={playRecording}
-                    className="button-secondary"
-                  >
-                    Play Recording
-                  </button>
-                  <p aria-live="polite" className="mt-2 text-xs leading-relaxed">
-                    {isBusy ? "Preparing audio…" : recording ? `Recording captured: ${recording.size.toLocaleString()} bytes (${recording.mimeType || "browser default"})` : "Record a few seconds, then stop to play it back."}
-                  </p>
-                  <audio ref={audioRef} src={recording?.url} onError={() => setErrorMessage("The browser could not decode this recording. Try recording again.")} />
-                </section>
-              </details>
             </div>
           </>
         ) : (
