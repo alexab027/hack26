@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { BrandHeader } from "../components/BrandHeader";
 import { CaptionDisplay } from "../components/CaptionDisplay";
 import { CallLanding } from "../components/call/CallLanding";
 import { ListeningButton } from "../components/ListeningButton";
@@ -44,7 +45,7 @@ export default function HomePage() {
   const [deepgramStatus, setDeepgramStatus] = useState<DeepgramStatus>("disconnected");
   const [semanticStatus, setSemanticStatus] = useState<SemanticStatus>("disconnected");
   const [finalCaptions, setFinalCaptions] = useState<Transcript[]>([]);
-  const [interimCaption, setInterimCaption] = useState<Transcript | null>(null);
+  const [interimCaptions, setInterimCaptions] = useState<Transcript[]>([]);
   const [audioCues, setAudioCues] = useState<AudioCue[]>([]);
 
   const clearRecording = () => {
@@ -91,7 +92,7 @@ export default function HomePage() {
     setDeepgramStatus("disconnected");
     setSemanticStatus("disconnected");
     setErrorMessage(message);
-    setInterimCaption(null);
+    setInterimCaptions([]);
 
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== "inactive") recorder.stop();
@@ -110,7 +111,7 @@ export default function HomePage() {
       deepgramAttemptRef.current += 1;
       setDeepgramStatus("disconnected");
       setSemanticStatus("disconnected");
-      setInterimCaption(null);
+      setInterimCaptions([]);
       semanticStreamRef.current?.stop();
       semanticStreamRef.current = null;
       const recorder = recorderRef.current;
@@ -134,7 +135,7 @@ export default function HomePage() {
     setIsBusy(true);
     setErrorMessage(null);
     setFinalCaptions([]);
-    setInterimCaption(null);
+    setInterimCaptions([]);
     setAudioCues([]);
     setSemanticStatus("connecting");
     clearRecording();
@@ -188,7 +189,7 @@ export default function HomePage() {
         semanticStreamRef.current = null;
         setDeepgramStatus("disconnected");
         setSemanticStatus("disconnected");
-        setInterimCaption(null);
+        setInterimCaptions([]);
         stopMicrophone(stream);
         if (recorder.state !== "inactive") recorder.stop();
         if (mountedRef.current) {
@@ -323,26 +324,25 @@ export default function HomePage() {
             `Deepgram disconnected unexpectedly (code ${event.code}).`,
           );
         },
-        onTranscript: (transcript) => {
+        onTranscripts: (transcripts) => {
           if (!mountedRef.current || deepgramAttemptRef.current !== attempt) return;
 
-          if (transcript.final) {
+          if (transcripts[0]?.final) {
             setFinalCaptions((current) => {
-              const existingIndex = current.findIndex((item) => item.id === transcript.id);
-              const next =
-                existingIndex === -1
-                  ? [...current, transcript]
-                  : current.map((item, index) =>
-                      index === existingIndex ? transcript : item,
-                    );
+              const next = [...current];
+              for (const transcript of transcripts) {
+                const existingIndex = next.findIndex((item) => item.id === transcript.id);
+                if (existingIndex === -1) next.push(transcript);
+                else next[existingIndex] = transcript;
+              }
               return next.slice(-MAX_FINAL_CAPTIONS);
             });
-            setInterimCaption(null);
+            setInterimCaptions([]);
           } else {
-            setInterimCaption(transcript);
+            setInterimCaptions(transcripts);
           }
         },
-      });
+      }, { speakerDiarization: true });
       deepgramConnectionRef.current = connection;
     } catch (error) {
       deepgramAttemptRef.current += 1;
@@ -352,7 +352,7 @@ export default function HomePage() {
       semanticStreamRef.current = null;
       setDeepgramStatus("disconnected");
       setSemanticStatus("disconnected");
-      setInterimCaption(null);
+      setInterimCaptions([]);
       const recorder = recorderRef.current;
       if (recorder && recorder.state !== "inactive") recorder.stop();
       stopMicrophone(microphoneStreamRef.current);
@@ -383,11 +383,11 @@ export default function HomePage() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4 py-6">
-      <div className="flex w-full max-w-md flex-col rounded-[2rem] border border-slate-700 bg-slate-900/90 p-4 shadow-2xl shadow-slate-950/40">
-        <header className="px-2 pb-3 pt-2">
-          <h1 className="text-3xl font-bold tracking-tight text-white">Semantic Captions</h1>
-          <div className="mt-4">
+    <main className="flex min-h-screen items-stretch justify-center sm:items-center sm:px-4 sm:py-8">
+      <div className="app-shell">
+        <header className="pb-4">
+          <BrandHeader />
+          <div className="mt-5">
             <ModeSelector
               mode={mode}
               onChange={setMode}
@@ -395,12 +395,12 @@ export default function HomePage() {
             />
           </div>
           {mode === "nearby" ? (
-            <div className="mt-3">
+            <div className="mt-4">
               <StatusIndicator isListening={isListening} errorMessage={errorMessage} />
-              <p aria-live="polite" className="mt-2 text-sm text-slate-300">
+              <p aria-live="polite" className="mt-2 text-[0.6875rem] text-[var(--text-muted)]">
                 Deepgram: {deepgramStatus === "connecting" ? "Connecting..." : deepgramStatus === "connected" ? "Connected" : "Disconnected"}
               </p>
-              <p aria-live="polite" className="mt-1 text-sm text-slate-300">
+              <p aria-live="polite" className="mt-0.5 text-[0.6875rem] text-[var(--text-muted)]">
                 Sound labels: {semanticStatus === "connecting" ? "Connecting..." : semanticStatus === "connected" ? "Connected" : semanticStatus === "unavailable" ? "Unavailable (captions still active)" : "Disconnected"}
               </p>
             </div>
@@ -409,31 +409,35 @@ export default function HomePage() {
 
         {mode === "nearby" ? (
           <>
-            <section className="flex-1 rounded-3xl border border-slate-700 bg-slate-950/80 p-4">
+            <section className="flex-1 rounded-3xl border border-[#dfe3da] bg-[var(--surface-soft)] p-3 sm:p-4">
               <CaptionDisplay
                 transcripts={finalCaptions}
-                interimTranscript={interimCaption}
+                interimTranscripts={interimCaptions}
                 audioCues={audioCues}
               />
             </section>
 
-            <div className="px-2 pb-2 pt-5">
+            <div className="pb-1 pt-4">
               <ListeningButton listening={isListening} onToggle={handleToggleListening} disabled={isBusy} />
-              <section aria-label="Audio Debug" className="mt-4 text-sm text-slate-300">
-                <p className="mb-2">Audio Debug (temporary)</p>
-                <button
-                  type="button"
-                  disabled={!recording || isListening || isBusy}
-                  onClick={playRecording}
-                  className="rounded-lg border border-slate-600 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:opacity-40"
-                >
-                  Play Recording
-                </button>
-                <p aria-live="polite" className="mt-2">
-                  {isBusy ? "Preparing audio…" : recording ? `Recording captured: ${recording.size.toLocaleString()} bytes (${recording.mimeType || "browser default"})` : "Record a few seconds, then stop to play it back."}
-                </p>
-                <audio ref={audioRef} src={recording?.url} onError={() => setErrorMessage("The browser could not decode this recording. Try recording again.")} />
-              </section>
+              <details className="mt-4 border-t border-[var(--border-soft)] pt-3 text-sm text-[var(--text-secondary)]">
+                <summary className="min-h-11 cursor-pointer select-none py-3 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]">
+                  Developer tools
+                </summary>
+                <section aria-label="Audio Debug" className="pb-2 pt-2">
+                  <button
+                    type="button"
+                    disabled={!recording || isListening || isBusy}
+                    onClick={playRecording}
+                    className="button-secondary"
+                  >
+                    Play Recording
+                  </button>
+                  <p aria-live="polite" className="mt-2 text-xs leading-relaxed">
+                    {isBusy ? "Preparing audio…" : recording ? `Recording captured: ${recording.size.toLocaleString()} bytes (${recording.mimeType || "browser default"})` : "Record a few seconds, then stop to play it back."}
+                  </p>
+                  <audio ref={audioRef} src={recording?.url} onError={() => setErrorMessage("The browser could not decode this recording. Try recording again.")} />
+                </section>
+              </details>
             </div>
           </>
         ) : (

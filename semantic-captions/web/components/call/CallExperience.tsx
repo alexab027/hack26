@@ -11,6 +11,7 @@ import {
 import { DisconnectReason } from "livekit-client";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { BrandHeader } from "../BrandHeader";
 import { ModeSelector } from "../ModeSelector";
 import { HostCallerCaptions } from "./HostCallerCaptions";
 import { hostSessionKey, type CallRole } from "../../lib/call";
@@ -105,40 +106,57 @@ function ConnectedCall({
     }
   };
 
+  const shareControls = (
+    <div>
+      <label htmlFor="share-call-url" className="text-sm font-semibold text-[var(--forest)]">
+        Share this link
+      </label>
+      <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+        <input
+          id="share-call-url"
+          readOnly
+          value={shareUrl}
+          onFocus={(event) => event.currentTarget.select()}
+          className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3 text-sm text-[var(--text-secondary)] focus:border-[var(--sage)] focus:outline-none focus:ring-2 focus:ring-[var(--sage-medium)]"
+        />
+        <button
+          type="button"
+          onClick={copyLink}
+          disabled={!shareUrl}
+          className="button-secondary whitespace-nowrap"
+        >
+          {copied ? "Copied" : shareUrl ? "Copy" : "Preparing"}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
-    <section className="rounded-3xl border border-slate-700 bg-slate-950/80 p-5">
-      <div className="flex items-center gap-2 text-sm font-semibold text-emerald-300">
-        <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.8)]" />
+    <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-4 sm:p-5">
+      <div className="flex items-center gap-2 text-sm font-semibold text-[#456052]">
+        <span className="h-2.5 w-2.5 rounded-full bg-[var(--status-active)]" />
         Connected
       </div>
 
       {role === "host" ? (
-        <div className="mt-5">
-          <label htmlFor="share-call-url" className="text-sm font-medium text-slate-200">
-            Share this call
-          </label>
-          <input
-            id="share-call-url"
-            readOnly
-            value={shareUrl}
-            onFocus={(event) => event.currentTarget.select()}
-            className="mt-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-3 text-sm text-slate-200 focus:border-sky-400 focus:outline-none"
-          />
-          <button
-            type="button"
-            onClick={copyLink}
-            disabled={!shareUrl}
-            className="mt-3 rounded-xl border border-sky-400/70 px-4 py-2 text-sm font-semibold text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:cursor-wait disabled:opacity-50"
-          >
-            {copied ? "Link Copied" : shareUrl ? "Copy Link" : "Preparing Link..."}
-          </button>
-          <p className="mt-5 text-sm text-slate-300">
-            {remoteParticipants.length > 0 ? "Caller connected" : "Waiting for caller..."}
+        <div className="mt-4">
+          <p className="text-lg font-semibold text-[var(--forest)]">
+            {remoteParticipants.length > 0 ? "Caller connected" : "Waiting for caller"}
           </p>
+          {remoteParticipants.length > 0 ? (
+            <details className="mt-3 rounded-xl border border-[var(--border-soft)] bg-[var(--surface)] px-3">
+              <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium text-[var(--text-secondary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]">
+                Share link
+              </summary>
+              <div className="pb-3">{shareControls}</div>
+            </details>
+          ) : (
+            <div className="mt-4">{shareControls}</div>
+          )}
           <HostCallerCaptions />
         </div>
       ) : (
-        <p className="mt-5 text-lg font-semibold text-white">In Call</p>
+        <p className="mt-5 text-2xl font-semibold text-[var(--forest)]">In call</p>
       )}
 
       <div className="mt-6 grid grid-cols-2 gap-3">
@@ -146,7 +164,7 @@ function ConnectedCall({
           type="button"
           onClick={toggleMute}
           disabled={muteBusy}
-          className="rounded-xl bg-slate-700 px-4 py-3 font-semibold text-white hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:opacity-50"
+          className="button-secondary"
         >
           {muteBusy ? "Updating..." : isMicrophoneEnabled ? "Mute" : "Unmute"}
         </button>
@@ -154,20 +172,20 @@ function ConnectedCall({
           type="button"
           onClick={endCall}
           disabled={endBusy}
-          className="rounded-xl bg-rose-500 px-4 py-3 font-semibold text-white hover:bg-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-11 rounded-xl bg-[var(--danger)] px-4 py-2.5 font-semibold text-white transition hover:bg-[var(--danger-dark)] focus:outline-none focus:ring-4 focus:ring-[#d9aaaa]/60 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {endBusy ? "Ending..." : "End Call"}
         </button>
       </div>
 
       {controlError ? (
-        <p role="alert" className="mt-4 text-sm text-rose-300">
+        <p role="alert" className="error-panel mt-4">
           {controlError}
         </p>
       ) : null}
 
       <RoomAudioRenderer />
-      <StartAudio label="Tap to allow call audio" />
+      <StartAudio className="button-secondary mt-4 w-full" label="Tap to allow call audio" />
     </section>
   );
 }
@@ -284,26 +302,31 @@ export function CallExperience({ roomId }: { roomId: string }) {
 
   if (!role) {
     return (
-      <main className="flex min-h-screen items-center justify-center px-4 py-6 text-slate-300">
-        Preparing call...
+      <main className="flex min-h-screen items-center justify-center bg-[var(--background)] px-4 py-6 text-[var(--text-secondary)]">
+        <span className="flex items-center gap-2">
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--sage)]" />
+          Preparing call...
+        </span>
       </main>
     );
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4 py-6">
-      <div className="flex w-full max-w-md flex-col rounded-[2rem] border border-slate-700 bg-slate-900/90 p-4 shadow-2xl shadow-slate-950/40">
-        <header className="px-2 pb-4 pt-2">
-          <h1 className="text-3xl font-bold tracking-tight text-white">Semantic Captions</h1>
-          <div className="mt-4">
-            <ModeSelector
-              mode="call"
-              disabled={callState === "connecting" || callState === "connected"}
-              onChange={(mode) => {
-                if (mode === "nearby") router.push("/");
-              }}
-            />
-          </div>
+    <main className="flex min-h-screen items-stretch justify-center sm:items-center sm:px-4 sm:py-8">
+      <div className="app-shell">
+        <header className="pb-5">
+          <BrandHeader />
+          {role === "host" ? (
+            <div className="mt-5">
+              <ModeSelector
+                mode="call"
+                disabled={callState === "connecting" || callState === "connected"}
+                onChange={(mode) => {
+                  if (mode === "nearby") router.push("/");
+                }}
+              />
+            </div>
+          ) : null}
         </header>
 
         {details ? (
@@ -327,30 +350,34 @@ export function CallExperience({ roomId }: { roomId: string }) {
                 onEnd={leaveCall}
               />
             ) : (
-              <section className="rounded-3xl border border-slate-700 bg-slate-950/80 p-6 text-center">
-                <p className="text-sky-300">Connecting...</p>
-                <p className="mt-2 text-sm text-slate-400">Allow microphone access when prompted.</p>
+              <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-7 text-center">
+                <p className="flex items-center justify-center gap-2 font-semibold text-[var(--forest)]">
+                  <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--sage)]" />
+                  Connecting...
+                </p>
+                <p className="mt-2 text-sm text-[var(--text-secondary)]">Allow microphone access when prompted.</p>
               </section>
             )}
           </LiveKitRoom>
         ) : (
-          <section className="rounded-3xl border border-slate-700 bg-slate-950/80 p-6 text-center">
+          <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] px-5 py-8 text-center sm:px-7">
             {callState === "disconnected" ? (
               <>
-                <h2 className="text-xl font-semibold text-white">Call ended</h2>
-                <p className="mt-2 text-sm text-slate-400">
+                <h2 className="text-2xl font-semibold text-[var(--forest)]">Call ended</h2>
+                <p className="mt-2 text-sm text-[var(--text-secondary)]">
                   {errorMessage || "The call is no longer active."}
                 </p>
               </>
             ) : role === "caller" ? (
               <>
-                <h2 className="text-xl font-semibold text-white">You&apos;ve been invited to a call.</h2>
-                <p className="mt-2 text-sm text-slate-400">
-                  Your microphone is requested only after you join.
+                <span aria-hidden="true" className="text-3xl text-[var(--sage)]">[ ]</span>
+                <h2 className="mt-3 text-2xl font-semibold text-[var(--forest)]">You&apos;ve been invited to a call.</h2>
+                <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-[var(--text-secondary)]">
+                  Subtext provides enhanced captions to the person who invited you. Your microphone is requested only after you join.
                 </p>
               </>
             ) : (
-              <h2 className="text-xl font-semibold text-white">
+              <h2 className="text-2xl font-semibold text-[var(--forest)]">
                 Starting your call
               </h2>
             )}
@@ -359,24 +386,27 @@ export function CallExperience({ roomId }: { roomId: string }) {
               <button
                 type="button"
                 onClick={leaveCall}
-                className="mt-6 w-full rounded-2xl bg-slate-700 px-5 py-4 text-lg font-semibold text-white hover:bg-slate-600 focus:outline-none focus:ring-4 focus:ring-sky-400/60"
+                className="button-secondary mt-6 w-full text-base"
               >
                 Return Home
               </button>
             ) : callState === "connecting" ? (
-              <p className="mt-5 text-sky-300">Preparing call...</p>
+              <p className="mt-5 flex items-center justify-center gap-2 text-[var(--text-secondary)]">
+                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--sage)]" />
+                Preparing call...
+              </p>
             ) : (
               <button
                 type="button"
                 onClick={() => void joinCall(role)}
-                className="mt-6 w-full rounded-2xl bg-sky-500 px-5 py-4 text-lg font-semibold text-white hover:bg-sky-400 focus:outline-none focus:ring-4 focus:ring-sky-400/60"
+                className="button-primary mt-7"
               >
                 {role === "caller" ? "Join Call" : "Start Again"}
               </button>
             )}
 
             {errorMessage && callState !== "disconnected" ? (
-              <p role="alert" className="mt-4 text-sm text-rose-300">
+              <p role="alert" className="error-panel mt-4">
                 {errorMessage}
               </p>
             ) : null}

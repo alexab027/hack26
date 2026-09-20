@@ -11,10 +11,10 @@ export function ListeningButton({ listening, onToggle, disabled = false }: Liste
       aria-pressed={listening}
       onClick={onToggle}
       disabled={disabled}
-      className={`w-full rounded-2xl px-5 py-5 text-xl font-semibold transition focus:outline-none focus:ring-4 focus:ring-sky-400/60 ${
+      className={`min-h-14 w-full rounded-2xl px-5 py-3.5 text-lg font-semibold transition focus:outline-none focus:ring-4 focus:ring-[var(--sage-medium)]/70 disabled:cursor-not-allowed disabled:opacity-50 ${
         listening
-          ? "bg-slate-100 text-slate-900 hover:bg-white"
-          : "bg-sky-500 text-white hover:bg-sky-400"
+          ? "border border-[var(--sage)] bg-transparent text-[var(--forest)] hover:bg-[var(--sage-pale)]"
+          : "bg-[var(--forest)] text-[var(--surface)] hover:bg-[var(--forest-dark)]"
       }`}
     >
       {listening ? "Stop Listening" : "Start Listening"}

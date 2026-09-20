@@ -1,4 +1,7 @@
-import { normalizeDeepgramTranscript } from "../captions/transcript";
+import {
+  normalizeDeepgramTranscript,
+  normalizeDiarizedDeepgramTranscripts,
+} from "../captions/transcript";
 import type { Transcript } from "../captions/types";
 
 const DEEPGRAM_LIVE_URL = "wss://api.deepgram.com/v1/listen";
@@ -7,7 +10,12 @@ export type DeepgramConnectionHandlers = {
   onOpen(): void;
   onError(): void;
   onClose(event: CloseEvent): void;
-  onTranscript(transcript: Transcript): void;
+  onTranscript?(transcript: Transcript): void;
+  onTranscripts?(transcripts: Transcript[]): void;
+};
+
+export type DeepgramConnectionOptions = {
+  speakerDiarization?: boolean;
 };
 
 export interface DeepgramConnection {
@@ -23,7 +31,30 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function handleMessage(event: MessageEvent, onTranscript: (transcript: Transcript) => void) {
+function rawSpeakerIds(result: Record<string, unknown>): number[] {
+  const channel = asRecord(result.channel);
+  const alternatives = channel?.alternatives;
+  const firstAlternative = Array.isArray(alternatives) ? asRecord(alternatives[0]) : null;
+  const words = firstAlternative?.words;
+  if (!Array.isArray(words)) return [];
+
+  return [
+    ...new Set(
+      words.flatMap((value) => {
+        const word = asRecord(value);
+        return typeof word?.speaker === "number" && Number.isInteger(word.speaker)
+          ? [word.speaker]
+          : [];
+      }),
+    ),
+  ].sort((left, right) => left - right);
+}
+
+function handleMessage(
+  event: MessageEvent,
+  handlers: DeepgramConnectionHandlers,
+  options: DeepgramConnectionOptions,
+) {
   if (typeof event.data !== "string") return;
 
   let message: unknown;
@@ -37,10 +68,29 @@ function handleMessage(event: MessageEvent, onTranscript: (transcript: Transcrip
   const result = asRecord(message);
   if (!result) return;
 
-  const transcript = normalizeDeepgramTranscript(result);
-  if (transcript) {
-    console.info(`[Deepgram] ${transcript.final ? "final" : "interim"}: ${transcript.text}`);
-    onTranscript(transcript);
+  if (options.speakerDiarization && result.type === "Results") {
+    const speakers = rawSpeakerIds(result);
+    console.info(
+      `[Diarization] raw speaker IDs: ${speakers.length > 0 ? speakers.join(", ") : "none"}`,
+    );
+  }
+
+  const transcripts = options.speakerDiarization
+    ? normalizeDiarizedDeepgramTranscripts(result)
+    : [normalizeDeepgramTranscript(result)].filter(
+        (transcript): transcript is Transcript => transcript !== null,
+      );
+  if (transcripts.length > 0) {
+    for (const transcript of transcripts) {
+      console.info(
+        `[Deepgram] ${transcript.final ? "final" : "interim"} speaker=${transcript.speaker}: ${transcript.text}`,
+      );
+    }
+    if (handlers.onTranscripts) {
+      handlers.onTranscripts(transcripts);
+    } else if (handlers.onTranscript) {
+      for (const transcript of transcripts) handlers.onTranscript(transcript);
+    }
     return;
   }
 
@@ -57,6 +107,7 @@ function handleMessage(event: MessageEvent, onTranscript: (transcript: Transcrip
 export function connectToDeepgram(
   token: string,
   handlers: DeepgramConnectionHandlers,
+  options: DeepgramConnectionOptions = {},
 ): DeepgramConnection {
   if (!token) {
     throw new Error("A temporary Deepgram token is required.");
@@ -67,6 +118,11 @@ export function connectToDeepgram(
   url.searchParams.set("language", "en-US");
   url.searchParams.set("interim_results", "true");
   url.searchParams.set("smart_format", "true");
+  if (options.speakerDiarization) {
+    // Deepgram continues to support this streaming-specific v1 diarizer path.
+    // Keep it scoped to Nearby; call transcription uses the default options.
+    url.searchParams.set("diarize", "true");
+  }
 
   // Browsers cannot set WebSocket Authorization headers. Deepgram accepts a
   // temporary JWT as the `bearer` Sec-WebSocket-Protocol pair instead.
@@ -83,7 +139,7 @@ export function connectToDeepgram(
     handlers.onError();
   });
 
-  socket.addEventListener("message", (event) => handleMessage(event, handlers.onTranscript));
+  socket.addEventListener("message", (event) => handleMessage(event, handlers, options));
 
   socket.addEventListener("close", (event) => {
     if (closeFallback) clearTimeout(closeFallback);
