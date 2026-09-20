@@ -3,17 +3,41 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
+  --background: #faf8f2;
+  --surface: #fffdf8;
+  --surface-soft: #f4f3eb;
+  --forest: #123d32;
+  --forest-dark: #0b3027;
+  --sage: #9eaf9a;
+  --sage-medium: #b7c3b2;
+  --sage-light: #e4e9df;
+  --sage-pale: #eff2eb;
+  --text-primary: #15372f;
+  --text-secondary: #68766d;
+  --text-muted: #6f7b74;
+  --border: #d9ded5;
+  --border-soft: #e7e9e2;
+  --danger: #a84c4c;
+  --danger-dark: #923f3f;
+  --danger-light: #f7e7e4;
+  --warning: #9a7333;
+  --warning-light: #f5ebd7;
+  --status-active: #6e9475;
+  --status-idle: #aeb7ad;
+  --focus: #6e9475;
 }
 
 html {
-  background-color: #020817;
+  background: var(--background);
 }
 
 body {
   min-height: 100vh;
-  background: linear-gradient(to bottom, #020817, #0f172a);
-  color: #f8fafc;
+  margin: 0;
+  background: radial-gradient(circle at 50% 15%, #fffdf8 0%, #faf8f2 48%, #f6f3ea 100%);
+  color: var(--text-primary);
+  font-family: var(--font-body), "DM Sans", Arial, sans-serif;
 }
 
 button {
@@ -25,8 +49,45 @@ button {
     box-sizing: border-box;
   }
 
-  body {
-    margin: 0;
-    font-family: Arial, Helvetica, sans-serif;
+  ::selection {
+    background: var(--sage-light);
+    color: var(--forest-dark);
+  }
+}
+
+@layer components {
+  .app-shell {
+    @apply flex w-full max-w-[32rem] flex-col bg-[var(--surface)] px-4 py-5 sm:rounded-[2rem] sm:border sm:border-[var(--border)] sm:p-6;
+    min-height: 100svh;
+  }
+
+  .button-primary {
+    @apply min-h-14 w-full rounded-2xl bg-[var(--forest)] px-5 py-3.5 text-base font-semibold text-[var(--surface)] transition hover:bg-[var(--forest-dark)] focus:outline-none focus:ring-4 focus:ring-[#b7c3b2] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .button-secondary {
+    @apply min-h-11 rounded-xl border border-[var(--border)] bg-[var(--sage-pale)] px-4 py-2.5 font-semibold text-[var(--forest)] transition hover:bg-[var(--sage-light)] focus:outline-none focus:ring-4 focus:ring-[#b7c3b2] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .error-panel {
+    @apply rounded-xl border border-[#eacbc7] bg-[var(--danger-light)] px-3 py-2.5 text-sm text-[#8e4545];
+  }
+}
+
+@media (min-width: 640px) {
+  .app-shell {
+    min-height: auto;
+    box-shadow: 0 22px 60px rgba(40, 61, 52, 0.1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

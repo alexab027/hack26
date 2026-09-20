@@ -6,18 +6,18 @@ type StatusIndicatorProps = {
 export function StatusIndicator({ isListening, errorMessage }: StatusIndicatorProps) {
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
+      <div className="flex items-center gap-2 text-sm font-semibold text-[#456052]">
         <span
           aria-hidden="true"
           className={`h-2.5 w-2.5 rounded-full ${
-            isListening ? "bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.8)]" : "bg-slate-500"
+            isListening ? "bg-[var(--status-active)]" : "bg-[var(--status-idle)]"
           }`}
         />
-        <span aria-live="polite">{isListening ? "Listening..." : "Not listening"}</span>
+        <span aria-live="polite">{isListening ? "Listening" : "Ready"}</span>
       </div>
 
       {errorMessage ? (
-        <p className="text-xs text-red-300" role="alert">
+        <p className="error-panel" role="alert">
           {errorMessage}
         </p>
       ) : null}
