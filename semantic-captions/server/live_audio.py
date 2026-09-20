@@ -12,6 +12,11 @@ from typing import Any
 import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
 
+from server.analysis.emotion import (
+    EmotionAnalysis,
+    LiveEmotionTracker,
+    analyze_emotion,
+)
 from server.analysis.prosody import LiveVolumeTracker
 from server.analysis.sounds import analyze_sounds
 from server.audio.preprocess import preprocess_audio
@@ -20,6 +25,7 @@ from server.audio.windows import (
     DEFAULT_WINDOW_SECONDS,
     AudioWindow,
 )
+from server.models.emotion_model import EmotionModel
 from server.models.sound_model import SoundModel
 from server.schemas import AudioCue
 
@@ -138,7 +144,17 @@ def analyze_live_window(audio_window: AudioWindow, model: SoundModel) -> list[Au
     )
 
 
-def _parse_start_message(message: str) -> tuple[int, str, bool]:
+def analyze_live_emotion_window(
+    audio_window: AudioWindow, model: EmotionModel
+) -> EmotionAnalysis:
+    """Preprocess one live window and retain its session interval separately."""
+    samples, sample_rate = preprocess_audio(
+        audio_window.samples, audio_window.sample_rate
+    )
+    return analyze_emotion(samples, sample_rate, model)
+
+
+def _parse_start_message(message: str) -> tuple[int, str, bool, bool]:
     try:
         payload: Any = json.loads(message)
     except json.JSONDecodeError as exc:
@@ -149,6 +165,7 @@ def _parse_start_message(message: str) -> tuple[int, str, bool]:
     sample_rate = payload.get("sample_rate")
     session_id = payload.get("session_id")
     enable_volume = payload.get("enable_volume", False)
+    enable_emotion = payload.get("enable_emotion", False)
     if not isinstance(sample_rate, int) or isinstance(sample_rate, bool):
         raise ValueError("sample_rate must be an integer")
     if not MIN_INPUT_SAMPLE_RATE <= sample_rate <= MAX_INPUT_SAMPLE_RATE:
@@ -160,7 +177,9 @@ def _parse_start_message(message: str) -> tuple[int, str, bool]:
         raise ValueError("session_id must be a non-empty string")
     if not isinstance(enable_volume, bool):
         raise ValueError("enable_volume must be a boolean")
-    return sample_rate, session_id[:128], enable_volume
+    if not isinstance(enable_emotion, bool):
+        raise ValueError("enable_emotion must be a boolean")
+    return sample_rate, session_id[:128], enable_volume, enable_emotion
 
 
 def _is_stop_message(message: str) -> bool:
@@ -209,6 +228,52 @@ async def _analysis_worker(
             queue.task_done()
 
 
+async def _emotion_analysis_worker(
+    websocket: WebSocket,
+    queue: asyncio.Queue[AudioWindow],
+    model: EmotionModel,
+    session_id: str,
+    send_lock: asyncio.Lock,
+) -> None:
+    tracker = LiveEmotionTracker()
+    while True:
+        audio_window = await queue.get()
+        try:
+            result = await asyncio.to_thread(
+                analyze_live_emotion_window, audio_window, model
+            )
+            logger.info(
+                "Live expression session %s %.2f-%.2f: %s %.3f",
+                session_id,
+                audio_window.start,
+                audio_window.end,
+                result.label,
+                result.confidence,
+            )
+            for cue in tracker.add(result, audio_window.start, audio_window.end):
+                async with send_lock:
+                    await websocket.send_json(cue.model_dump(mode="json"))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Live expression inference failed for session %s at %.2f-%.2f seconds",
+                session_id,
+                audio_window.start,
+                audio_window.end,
+            )
+            with suppress(Exception):
+                async with send_lock:
+                    await websocket.send_json(
+                        {
+                            "type": "emotion_error",
+                            "message": "Vocal-expression analysis failed for one window.",
+                        }
+                    )
+        finally:
+            queue.task_done()
+
+
 def _queue_latest_window(
     queue: asyncio.Queue[AudioWindow], window: AudioWindow, session_id: str
 ) -> None:
@@ -224,11 +289,19 @@ def _queue_latest_window(
     queue.put_nowait(window)
 
 
-async def stream_audio_cues(websocket: WebSocket, model: SoundModel) -> None:
+async def stream_audio_cues(
+    websocket: WebSocket,
+    model: SoundModel,
+    emotion_model: EmotionModel | None = None,
+) -> None:
     """Serve one browser PCM session over an accepted FastAPI WebSocket."""
     await websocket.accept()
     worker: asyncio.Task[None] | None = None
+    emotion_worker: asyncio.Task[None] | None = None
     queue: asyncio.Queue[AudioWindow] = asyncio.Queue(maxsize=MAX_PENDING_WINDOWS)
+    emotion_queue: asyncio.Queue[AudioWindow] = asyncio.Queue(
+        maxsize=MAX_PENDING_WINDOWS
+    )
     send_lock = asyncio.Lock()
     graceful_stop = False
 
@@ -239,18 +312,34 @@ async def stream_audio_cues(websocket: WebSocket, model: SoundModel) -> None:
         start_text = first.get("text")
         if not isinstance(start_text, str):
             raise ValueError("first WebSocket message must be start JSON")
-        sample_rate, session_id, enable_volume = _parse_start_message(start_text)
+        sample_rate, session_id, enable_volume, enable_emotion = _parse_start_message(
+            start_text
+        )
+        if enable_emotion and emotion_model is None:
+            raise ValueError("emotion analysis is unavailable")
         pcm_buffer = LivePcmBuffer(sample_rate)
         volume_tracker = LiveVolumeTracker(sample_rate) if enable_volume else None
         volume_merger = LiveCueMerger()
         worker = asyncio.create_task(
             _analysis_worker(websocket, queue, model, session_id, send_lock)
         )
+        if enable_emotion:
+            assert emotion_model is not None
+            emotion_worker = asyncio.create_task(
+                _emotion_analysis_worker(
+                    websocket,
+                    emotion_queue,
+                    emotion_model,
+                    session_id,
+                    send_lock,
+                )
+            )
         logger.info(
-            "Started live semantic session %s at %d Hz (volume=%s)",
+            "Started live semantic session %s at %d Hz (volume=%s, emotion=%s)",
             session_id,
             sample_rate,
             enable_volume,
+            enable_emotion,
         )
 
         while True:
@@ -280,12 +369,16 @@ async def stream_audio_cues(websocket: WebSocket, model: SoundModel) -> None:
 
                 for window in pcm_buffer.add_samples(samples):
                     _queue_latest_window(queue, window, session_id)
+                    if enable_emotion:
+                        _queue_latest_window(emotion_queue, window, session_id)
             elif isinstance(text, str) and _is_stop_message(text):
                 graceful_stop = True
                 break
 
         if graceful_stop:
             await queue.join()
+            if enable_emotion:
+                await emotion_queue.join()
             logger.info(
                 "Stopped live semantic session %s after %d samples",
                 session_id,
@@ -302,5 +395,9 @@ async def stream_audio_cues(websocket: WebSocket, model: SoundModel) -> None:
             worker.cancel()
             with suppress(asyncio.CancelledError):
                 await worker
+        if emotion_worker is not None:
+            emotion_worker.cancel()
+            with suppress(asyncio.CancelledError):
+                await emotion_worker
         with suppress(Exception):
             await websocket.close()

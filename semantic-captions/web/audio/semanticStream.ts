@@ -11,6 +11,7 @@ export type SemanticStreamHandlers = {
 
 export type SemanticStreamStartOptions = {
   enableVolume?: boolean;
+  enableEmotion?: boolean;
 };
 
 export interface SemanticStream {
@@ -146,6 +147,11 @@ export async function prepareSemanticStream(
       const control = asRecord(payload);
       if (control?.type === "semantic_error" && typeof control.message === "string") {
         handlers.onWarning(control.message);
+      } else if (
+        control?.type === "emotion_error" &&
+        typeof control.message === "string"
+      ) {
+        console.warn(`[Emotion] ${control.message}`);
       }
     } catch {
       console.warn("[Semantic] ignored a malformed backend message");
@@ -174,6 +180,7 @@ export async function prepareSemanticStream(
           sample_rate: context.sampleRate,
           session_id: sessionId,
           ...(options?.enableVolume ? { enable_volume: true } : {}),
+          ...(options?.enableEmotion ? { enable_emotion: true } : {}),
         }),
       );
       sending = true;

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CaptionDisplay } from "../components/CaptionDisplay";
+import { EmotionAlerts } from "../components/EmotionAlerts";
 import { CallLanding } from "../components/call/CallLanding";
 import { ListeningButton } from "../components/ListeningButton";
 import { ModeSelector, type AppMode } from "../components/ModeSelector";
@@ -24,6 +25,8 @@ type SemanticStatus = "disconnected" | "connecting" | "connected" | "unavailable
 const AUDIO_CHUNK_MS = 250;
 const MAX_FINAL_CAPTIONS = 100;
 const MAX_SEMANTIC_CUES = 200;
+const MAX_EMOTION_ALERTS = 3;
+const EMOTION_ALERT_DURATION_MS = 6000;
 
 export default function HomePage() {
   const [mode, setMode] = useState<AppMode>("nearby");
@@ -36,6 +39,7 @@ export default function HomePage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const deepgramConnectionRef = useRef<DeepgramConnection | null>(null);
   const semanticStreamRef = useRef<SemanticStream | null>(null);
+  const emotionAlertTimersRef = useRef<number[]>([]);
   const deepgramAttemptRef = useRef(0);
   const mountedRef = useRef(false);
   const busyRef = useRef(false);
@@ -46,6 +50,7 @@ export default function HomePage() {
   const [finalCaptions, setFinalCaptions] = useState<Transcript[]>([]);
   const [interimCaption, setInterimCaption] = useState<Transcript | null>(null);
   const [audioCues, setAudioCues] = useState<AudioCue[]>([]);
+  const [emotionAlerts, setEmotionAlerts] = useState<AudioCue[]>([]);
 
   const clearRecording = () => {
     audioRef.current?.pause();
@@ -64,6 +69,8 @@ export default function HomePage() {
       deepgramConnectionRef.current = null;
       semanticStreamRef.current?.close();
       semanticStreamRef.current = null;
+      for (const timer of emotionAlertTimersRef.current) window.clearTimeout(timer);
+      emotionAlertTimersRef.current = [];
       const recorder = recorderRef.current;
       if (recorder) {
         recorder.ondataavailable = null;
@@ -92,6 +99,9 @@ export default function HomePage() {
     setSemanticStatus("disconnected");
     setErrorMessage(message);
     setInterimCaption(null);
+    setEmotionAlerts([]);
+    for (const timer of emotionAlertTimersRef.current) window.clearTimeout(timer);
+    emotionAlertTimersRef.current = [];
 
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== "inactive") recorder.stop();
@@ -111,6 +121,9 @@ export default function HomePage() {
       setDeepgramStatus("disconnected");
       setSemanticStatus("disconnected");
       setInterimCaption(null);
+      setEmotionAlerts([]);
+      for (const timer of emotionAlertTimersRef.current) window.clearTimeout(timer);
+      emotionAlertTimersRef.current = [];
       semanticStreamRef.current?.stop();
       semanticStreamRef.current = null;
       const recorder = recorderRef.current;
@@ -136,6 +149,9 @@ export default function HomePage() {
     setFinalCaptions([]);
     setInterimCaption(null);
     setAudioCues([]);
+    setEmotionAlerts([]);
+    for (const timer of emotionAlertTimersRef.current) window.clearTimeout(timer);
+    emotionAlertTimersRef.current = [];
     setSemanticStatus("connecting");
     clearRecording();
     setRecording(null);
@@ -230,6 +246,28 @@ export default function HomePage() {
         onCue: (cue) => {
           if (!mountedRef.current || deepgramAttemptRef.current !== attempt) return;
           setSemanticStatus("connected");
+          if (cue.category === "emotion") {
+            const cueKey = `${cue.label}-${cue.start}-${cue.end}`;
+            setEmotionAlerts((current) =>
+              [
+                ...current.filter(
+                  (item) => `${item.label}-${item.start}-${item.end}` !== cueKey,
+                ),
+                cue,
+              ].slice(-MAX_EMOTION_ALERTS),
+            );
+            const timer = window.setTimeout(() => {
+              setEmotionAlerts((current) =>
+                current.filter(
+                  (item) => `${item.label}-${item.start}-${item.end}` !== cueKey,
+                ),
+              );
+              emotionAlertTimersRef.current =
+                emotionAlertTimersRef.current.filter((item) => item !== timer);
+            }, EMOTION_ALERT_DURATION_MS);
+            emotionAlertTimersRef.current.push(timer);
+            return;
+          }
           setAudioCues((current) =>
             mergeAudioCue(current, cue).slice(-MAX_SEMANTIC_CUES),
           );
@@ -294,7 +332,10 @@ export default function HomePage() {
                     typeof globalThis.crypto?.randomUUID === "function"
                       ? globalThis.crypto.randomUUID()
                       : `semantic-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-                  semanticStream.start(sessionId, { enableVolume: true });
+                  semanticStream.start(sessionId, {
+                    enableVolume: true,
+                    enableEmotion: true,
+                  });
                   setSemanticStatus("connected");
                 } catch (error) {
                   console.warn(
@@ -353,6 +394,9 @@ export default function HomePage() {
       setDeepgramStatus("disconnected");
       setSemanticStatus("disconnected");
       setInterimCaption(null);
+      setEmotionAlerts([]);
+      for (const timer of emotionAlertTimersRef.current) window.clearTimeout(timer);
+      emotionAlertTimersRef.current = [];
       const recorder = recorderRef.current;
       if (recorder && recorder.state !== "inactive") recorder.stop();
       stopMicrophone(microphoneStreamRef.current);
@@ -409,6 +453,7 @@ export default function HomePage() {
 
         {mode === "nearby" ? (
           <>
+            <EmotionAlerts cues={emotionAlerts} />
             <section className="flex-1 rounded-3xl border border-slate-700 bg-slate-950/80 p-4">
               <CaptionDisplay
                 transcripts={finalCaptions}

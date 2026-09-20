@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.audio.windows import AudioWindow
+from server.analysis.emotion import EmotionAnalysis
 from server.live_audio import (
     LiveCueMerger,
     LivePcmBuffer,
@@ -111,6 +112,7 @@ def test_websocket_serializes_audio_cue_without_model_download(monkeypatch) -> N
 
     monkeypatch.setattr("server.live_audio.analyze_live_window", fake_analyze)
     monkeypatch.setattr("server.main.sound_model.warm_up", lambda: None)
+    monkeypatch.setattr("server.main.emotion_model.warm_up", lambda: None)
     samples = np.zeros(32_000, dtype="<f4")
 
     with TestClient(app).websocket_connect("/ws/analyze") as websocket:
@@ -132,10 +134,17 @@ def test_websocket_serializes_audio_cue_without_model_download(monkeypatch) -> N
 def test_start_message_enables_volume_only_when_explicitly_requested() -> None:
     base = {"type": "start", "sample_rate": 16_000, "session_id": "test"}
 
-    assert _parse_start_message(json.dumps(base)) == (16_000, "test", False)
+    assert _parse_start_message(json.dumps(base)) == (16_000, "test", False, False)
     assert _parse_start_message(json.dumps({**base, "enable_volume": True})) == (
         16_000,
         "test",
+        True,
+        False,
+    )
+    assert _parse_start_message(json.dumps({**base, "enable_emotion": True})) == (
+        16_000,
+        "test",
+        False,
         True,
     )
 
@@ -143,6 +152,7 @@ def test_start_message_enables_volume_only_when_explicitly_requested() -> None:
 def test_websocket_emits_nearby_volume_style_without_waiting_for_ast(monkeypatch) -> None:
     monkeypatch.setattr("server.live_audio.analyze_live_window", lambda *_: [])
     monkeypatch.setattr("server.main.sound_model.warm_up", lambda: None)
+    monkeypatch.setattr("server.main.emotion_model.warm_up", lambda: None)
     normal = np.full(6_400, 10 ** (-30 / 20), dtype="<f4")
     loud = np.full(9_600, 10 ** (-14 / 20), dtype="<f4")
 
@@ -163,4 +173,47 @@ def test_websocket_emits_nearby_volume_style_without_waiting_for_ast(monkeypatch
         assert cue["label"] == "volume_large"
         assert cue["start"] == pytest.approx(0.6)
         assert cue["end"] == pytest.approx(1.0)
+        websocket.send_json({"type": "stop"})
+
+
+def test_websocket_emits_persistent_nearby_emotion_alert(monkeypatch) -> None:
+    monkeypatch.setattr("server.live_audio.analyze_live_window", lambda *_: [])
+    monkeypatch.setattr("server.main.sound_model.warm_up", lambda: None)
+    monkeypatch.setattr("server.main.emotion_model.warm_up", lambda: None)
+    result = EmotionAnalysis(
+        label="angry_sounding",
+        confidence=0.81,
+        raw_label="ang",
+        scores={
+            "neutral": 0.10,
+            "positive_sounding": 0.03,
+            "angry_sounding": 0.81,
+            "sad_sounding": 0.06,
+        },
+        raw_scores={"neu": 0.10, "hap": 0.03, "ang": 0.81, "sad": 0.06},
+        future_alert="Angry-sounding speech detected",
+    )
+    monkeypatch.setattr(
+        "server.live_audio.analyze_live_emotion_window", lambda *_: result
+    )
+    samples = np.zeros(48_000, dtype="<f4")
+
+    with TestClient(app).websocket_connect("/ws/analyze") as websocket:
+        websocket.send_json(
+            {
+                "type": "start",
+                "sample_rate": 16_000,
+                "session_id": "nearby-emotion-test",
+                "enable_emotion": True,
+            }
+        )
+        websocket.send_bytes(samples.tobytes())
+        assert websocket.receive_json() == {
+            "type": "audio_cue",
+            "start": 1.0,
+            "end": 3.0,
+            "category": "emotion",
+            "label": "angry_sounding",
+            "confidence": 0.81,
+        }
         websocket.send_json({"type": "stop"})

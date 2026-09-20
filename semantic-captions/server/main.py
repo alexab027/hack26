@@ -12,16 +12,18 @@ from soundfile import SoundFileError
 from server.analysis.sounds import analyze_environmental_audio
 from server.audio.preprocess import load_audio_bytes
 from server.live_audio import stream_audio_cues
+from server.models.emotion_model import EmotionModel
 from server.models.sound_model import SoundModel
 from server.schemas import AudioCue
 
 logger = logging.getLogger(__name__)
 sound_model = SoundModel()
+emotion_model = EmotionModel()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Warm AST off the event loop before accepting live audio sessions."""
+    """Warm live classifiers off the event loop before accepting sessions."""
     logger.info("Warming up the AST sound classifier")
     try:
         await asyncio.to_thread(sound_model.warm_up)
@@ -31,6 +33,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         )
     else:
         logger.info("AST sound classifier warm-up complete")
+
+    logger.info("Warming up the vocal-expression classifier")
+    try:
+        await asyncio.to_thread(emotion_model.warm_up)
+    except Exception:
+        logger.exception(
+            "Emotion warm-up failed; Nearby mode will retry on first inference"
+        )
+    else:
+        logger.info("Vocal-expression classifier warm-up complete")
     yield
 
 
@@ -61,4 +73,4 @@ async def analyze_file(
 @app.websocket("/ws/analyze")
 async def analyze_live(websocket: WebSocket) -> None:
     """Analyze continuous browser Float32 PCM without blocking the event loop."""
-    await stream_audio_cues(websocket, sound_model)
+    await stream_audio_cues(websocket, sound_model, emotion_model)
