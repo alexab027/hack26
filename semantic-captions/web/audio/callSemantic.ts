@@ -1,8 +1,13 @@
 import type { RemoteAudioTrack } from "livekit-client";
+import type { AudioCue } from "../captions/types";
 import { prepareSemanticStream, type SemanticStream } from "./semanticStream";
 
 export type CallSemanticSession = {
   stop(): void;
+};
+
+export type CallSemanticHandlers = {
+  onCue(cue: AudioCue): void;
 };
 
 function createSessionId(): string {
@@ -18,6 +23,7 @@ function createSessionId(): string {
 export async function startCallSemanticAnalysis(
   remoteTrack: RemoteAudioTrack,
   signal: AbortSignal,
+  handlers: CallSemanticHandlers,
 ): Promise<CallSemanticSession | null> {
   const sharedTrack = remoteTrack.mediaStreamTrack;
   const callerStream = new MediaStream([sharedTrack]);
@@ -38,6 +44,7 @@ export async function startCallSemanticAnalysis(
           `[Call Semantic] ${cue.label} ${cue.start.toFixed(2)}-${cue.end.toFixed(2)} confidence=${cue.confidence.toFixed(3)}`,
           cue,
         );
+        handlers.onCue(cue);
       },
       onWarning: (message) => {
         console.warn(`[Call Semantic] ${message}`);

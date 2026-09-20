@@ -27,6 +27,10 @@ type TokenResponse = {
   participant_token?: unknown;
 };
 
+type NgrokUrlResponse = {
+  public_url?: unknown;
+};
+
 function ConnectedCall({
   role,
   roomId,
@@ -62,6 +66,8 @@ function ConnectedCall({
   };
 
   const copyLink = async () => {
+    if (!shareUrl) return;
+
     try {
       await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
@@ -121,9 +127,10 @@ function ConnectedCall({
           <button
             type="button"
             onClick={copyLink}
-            className="mt-3 rounded-xl border border-sky-400/70 px-4 py-2 text-sm font-semibold text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-400"
+            disabled={!shareUrl}
+            className="mt-3 rounded-xl border border-sky-400/70 px-4 py-2 text-sm font-semibold text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:cursor-wait disabled:opacity-50"
           >
-            {copied ? "Link Copied" : "Copy Link"}
+            {copied ? "Link Copied" : shareUrl ? "Copy Link" : "Preparing Link..."}
           </button>
           <p className="mt-5 text-sm text-slate-300">
             {remoteParticipants.length > 0 ? "Caller connected" : "Waiting for caller..."}
@@ -178,7 +185,38 @@ export function CallExperience({ roomId }: { roomId: string }) {
   useEffect(() => {
     const isHost = sessionStorage.getItem(hostSessionKey(roomId)) === "true";
     setRole(isHost ? "host" : "caller");
-    setShareUrl(`${window.location.origin}/call/${roomId}`);
+  }, [roomId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fallbackUrl = `${window.location.origin}/call/${roomId}`;
+    setShareUrl("");
+
+    const loadShareUrl = async () => {
+      try {
+        const response = await fetch("/api/ngrok-url", { cache: "no-store" });
+        const body = (await response.json()) as NgrokUrlResponse;
+        if (!response.ok || typeof body.public_url !== "string") {
+          throw new Error("No public ngrok URL is available");
+        }
+
+        const publicUrl = new URL(body.public_url);
+        if (publicUrl.protocol !== "https:") {
+          throw new Error("The public ngrok URL is not HTTPS");
+        }
+
+        if (!cancelled) {
+          setShareUrl(`${publicUrl.origin}/call/${roomId}`);
+        }
+      } catch {
+        if (!cancelled) setShareUrl(fallbackUrl);
+      }
+    };
+
+    void loadShareUrl();
+    return () => {
+      cancelled = true;
+    };
   }, [roomId]);
 
   const joinCall = useCallback(

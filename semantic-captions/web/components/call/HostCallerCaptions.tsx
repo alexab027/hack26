@@ -18,10 +18,12 @@ import {
   startCallSemanticAnalysis,
   type CallSemanticSession,
 } from "../../audio/callSemantic";
-import type { Transcript } from "../../captions/types";
+import { mergeAudioCue } from "../../captions/mergeCues";
+import type { AudioCue, Transcript } from "../../captions/types";
 import { CaptionDisplay } from "../CaptionDisplay";
 
 const MAX_FINAL_CAPTIONS = 100;
+const MAX_SEMANTIC_CUES = 200;
 
 type CaptionStatus = "waiting" | "starting" | "listening" | "error";
 
@@ -67,6 +69,7 @@ export function HostCallerCaptions() {
   const room = useRoomContext();
   const [finalCaptions, setFinalCaptions] = useState<Transcript[]>([]);
   const [interimCaption, setInterimCaption] = useState<Transcript | null>(null);
+  const [audioCues, setAudioCues] = useState<AudioCue[]>([]);
   const [status, setStatus] = useState<CaptionStatus>("waiting");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [retryNumber, setRetryNumber] = useState(0);
@@ -87,6 +90,7 @@ export function HostCallerCaptions() {
       active = null;
       if (updateState) {
         setInterimCaption(null);
+        setAudioCues([]);
         setStatus(nextStatus);
       }
     };
@@ -121,6 +125,14 @@ export function HostCallerCaptions() {
           const semanticSession = await startCallSemanticAnalysis(
             track,
             controller.signal,
+            {
+              onCue: (cue) => {
+                if (disposed || active?.generation !== trackGeneration) return;
+                setAudioCues((current) =>
+                  mergeAudioCue(current, cue).slice(-MAX_SEMANTIC_CUES),
+                );
+              },
+            },
           );
           if (!semanticSession) return;
 
@@ -289,6 +301,7 @@ export function HostCallerCaptions() {
           <CaptionDisplay
             transcripts={finalCaptions}
             interimTranscript={interimCaption}
+            audioCues={audioCues}
             speakerLabel="Caller"
             emptyMessage="Listening for caller..."
           />

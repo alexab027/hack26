@@ -17,6 +17,13 @@
 - Kept Deepgram working if semantic analysis is unavailable or falls behind.
 - Added a silent 2-second AST warm-up during FastAPI startup so model startup
   does not delay the first live sound event.
+- Added Phone Call mode semantic analysis for the remote LiveKit caller track
+  without taking ownership of or stopping the shared track.
+- Wired call `AudioCue` events into the existing merge and `CaptionDisplay`
+  flow, including standalone cues, overlap association, bounded history, and
+  session cleanup.
+- Added automatic phone-ready share links by discovering the current HTTPS
+  ngrok tunnel for port 3000 through the local ngrok inspector on port 4040.
 
 ## Semantic Cues
 
@@ -32,6 +39,9 @@ raw score rather than summed confidence.
 - Frontend TypeScript checks and the production Next.js build pass.
 - A real iPhone laughter recording produced a merged `laughter` cue at 5-8 seconds.
 - Live Deepgram captions and semantic labels now work together.
+- Confirmed phone-to-computer calls reach Deepgram and AST, with semantic cues
+  displayed alongside caller captions on the computer host.
+- Confirmed automatic ngrok discovery returns the active machine-specific URL.
 - Expected live delay is the 2-second window plus local AST inference time.
 
 ## Run Locally
@@ -51,5 +61,5 @@ npm.cmd run dev
 
 ## Next Step
 
-Validate more real laughter, cough, and environmental recordings before tuning
-the unchanged threshold or changing the analysis windows.
+Validate more real laughter, cough, and environmental recordings in both Nearby
+and Phone Call modes before tuning the unchanged threshold or analysis windows.
