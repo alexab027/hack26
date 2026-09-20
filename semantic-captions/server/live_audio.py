@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
 
+from server.analysis.prosody import LiveVolumeTracker
 from server.analysis.sounds import analyze_sounds
 from server.audio.preprocess import preprocess_audio
 from server.audio.windows import (
@@ -28,6 +29,13 @@ LIVE_CONFIDENCE_THRESHOLD = 0.15
 MAX_PENDING_WINDOWS = 2
 MIN_INPUT_SAMPLE_RATE = 8_000
 MAX_INPUT_SAMPLE_RATE = 192_000
+
+
+def decode_pcm_bytes(payload: bytes) -> np.ndarray:
+    """Decode one little-endian Float32 PCM message for all live analyzers."""
+    if len(payload) % np.dtype("<f4").itemsize:
+        raise ValueError("PCM byte length must be divisible by four")
+    return np.frombuffer(payload, dtype="<f4")
 
 
 @dataclass
@@ -50,10 +58,7 @@ class LivePcmBuffer:
 
     def add_bytes(self, payload: bytes) -> list[AudioWindow]:
         """Decode one little-endian Float32 PCM message and return new windows."""
-        if len(payload) % np.dtype("<f4").itemsize:
-            raise ValueError("PCM byte length must be divisible by four")
-        samples = np.frombuffer(payload, dtype="<f4")
-        return self.add_samples(samples)
+        return self.add_samples(decode_pcm_bytes(payload))
 
     def add_samples(self, samples: np.ndarray) -> list[AudioWindow]:
         """Append one mono chunk while retaining only samples needed in the future."""
@@ -133,7 +138,7 @@ def analyze_live_window(audio_window: AudioWindow, model: SoundModel) -> list[Au
     )
 
 
-def _parse_start_message(message: str) -> tuple[int, str]:
+def _parse_start_message(message: str) -> tuple[int, str, bool]:
     try:
         payload: Any = json.loads(message)
     except json.JSONDecodeError as exc:
@@ -143,6 +148,7 @@ def _parse_start_message(message: str) -> tuple[int, str]:
 
     sample_rate = payload.get("sample_rate")
     session_id = payload.get("session_id")
+    enable_volume = payload.get("enable_volume", False)
     if not isinstance(sample_rate, int) or isinstance(sample_rate, bool):
         raise ValueError("sample_rate must be an integer")
     if not MIN_INPUT_SAMPLE_RATE <= sample_rate <= MAX_INPUT_SAMPLE_RATE:
@@ -152,7 +158,9 @@ def _parse_start_message(message: str) -> tuple[int, str]:
         )
     if not isinstance(session_id, str) or not session_id.strip():
         raise ValueError("session_id must be a non-empty string")
-    return sample_rate, session_id[:128]
+    if not isinstance(enable_volume, bool):
+        raise ValueError("enable_volume must be a boolean")
+    return sample_rate, session_id[:128], enable_volume
 
 
 def _is_stop_message(message: str) -> bool:
@@ -168,6 +176,7 @@ async def _analysis_worker(
     queue: asyncio.Queue[AudioWindow],
     model: SoundModel,
     session_id: str,
+    send_lock: asyncio.Lock,
 ) -> None:
     merger = LiveCueMerger()
     while True:
@@ -177,7 +186,8 @@ async def _analysis_worker(
             for cue in cues:
                 update = merger.add(cue)
                 if update is not None:
-                    await websocket.send_json(update.model_dump(mode="json"))
+                    async with send_lock:
+                        await websocket.send_json(update.model_dump(mode="json"))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -188,12 +198,13 @@ async def _analysis_worker(
                 audio_window.end,
             )
             with suppress(Exception):
-                await websocket.send_json(
-                    {
-                        "type": "semantic_error",
-                        "message": "Semantic audio analysis failed for one window.",
-                    }
-                )
+                async with send_lock:
+                    await websocket.send_json(
+                        {
+                            "type": "semantic_error",
+                            "message": "Semantic audio analysis failed for one window.",
+                        }
+                    )
         finally:
             queue.task_done()
 
@@ -218,6 +229,7 @@ async def stream_audio_cues(websocket: WebSocket, model: SoundModel) -> None:
     await websocket.accept()
     worker: asyncio.Task[None] | None = None
     queue: asyncio.Queue[AudioWindow] = asyncio.Queue(maxsize=MAX_PENDING_WINDOWS)
+    send_lock = asyncio.Lock()
     graceful_stop = False
 
     try:
@@ -227,13 +239,18 @@ async def stream_audio_cues(websocket: WebSocket, model: SoundModel) -> None:
         start_text = first.get("text")
         if not isinstance(start_text, str):
             raise ValueError("first WebSocket message must be start JSON")
-        sample_rate, session_id = _parse_start_message(start_text)
+        sample_rate, session_id, enable_volume = _parse_start_message(start_text)
         pcm_buffer = LivePcmBuffer(sample_rate)
+        volume_tracker = LiveVolumeTracker(sample_rate) if enable_volume else None
+        volume_merger = LiveCueMerger()
         worker = asyncio.create_task(
-            _analysis_worker(websocket, queue, model, session_id)
+            _analysis_worker(websocket, queue, model, session_id, send_lock)
         )
         logger.info(
-            "Started live semantic session %s at %d Hz", session_id, sample_rate
+            "Started live semantic session %s at %d Hz (volume=%s)",
+            session_id,
+            sample_rate,
+            enable_volume,
         )
 
         while True:
@@ -243,7 +260,25 @@ async def stream_audio_cues(websocket: WebSocket, model: SoundModel) -> None:
             binary = message.get("bytes")
             text = message.get("text")
             if binary is not None:
-                for window in pcm_buffer.add_bytes(binary):
+                samples = decode_pcm_bytes(binary)
+                if volume_tracker is not None:
+                    try:
+                        for cue in volume_tracker.add_samples(samples):
+                            update = volume_merger.add(cue)
+                            if update is not None:
+                                async with send_lock:
+                                    await websocket.send_json(
+                                        update.model_dump(mode="json")
+                                    )
+                    except Exception:
+                        logger.exception(
+                            "Live volume analysis failed for session %s; "
+                            "environmental analysis will continue",
+                            session_id,
+                        )
+                        volume_tracker = None
+
+                for window in pcm_buffer.add_samples(samples):
                     _queue_latest_window(queue, window, session_id)
             elif isinstance(text, str) and _is_stop_message(text):
                 graceful_stop = True

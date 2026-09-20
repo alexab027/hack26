@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test:volume-ui": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/volume-style.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

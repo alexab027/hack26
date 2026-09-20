@@ -1,8 +1,16 @@
+import json
+
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 from server.audio.windows import AudioWindow
-from server.live_audio import LiveCueMerger, LivePcmBuffer, analyze_live_window
+from server.live_audio import (
+    LiveCueMerger,
+    LivePcmBuffer,
+    _parse_start_message,
+    analyze_live_window,
+)
 from server.main import app
 from server.schemas import AudioCue
 
@@ -118,4 +126,41 @@ def test_websocket_serializes_audio_cue_without_model_download(monkeypatch) -> N
             "label": "laughter",
             "confidence": 0.42,
         }
+        websocket.send_json({"type": "stop"})
+
+
+def test_start_message_enables_volume_only_when_explicitly_requested() -> None:
+    base = {"type": "start", "sample_rate": 16_000, "session_id": "test"}
+
+    assert _parse_start_message(json.dumps(base)) == (16_000, "test", False)
+    assert _parse_start_message(json.dumps({**base, "enable_volume": True})) == (
+        16_000,
+        "test",
+        True,
+    )
+
+
+def test_websocket_emits_nearby_volume_style_without_waiting_for_ast(monkeypatch) -> None:
+    monkeypatch.setattr("server.live_audio.analyze_live_window", lambda *_: [])
+    monkeypatch.setattr("server.main.sound_model.warm_up", lambda: None)
+    normal = np.full(6_400, 10 ** (-30 / 20), dtype="<f4")
+    loud = np.full(9_600, 10 ** (-14 / 20), dtype="<f4")
+
+    with TestClient(app).websocket_connect("/ws/analyze") as websocket:
+        websocket.send_json(
+            {
+                "type": "start",
+                "sample_rate": 16_000,
+                "session_id": "nearby-volume-test",
+                "enable_volume": True,
+            }
+        )
+        websocket.send_bytes(np.concatenate((normal, loud)).tobytes())
+
+        cue = websocket.receive_json()
+        assert cue["type"] == "audio_cue"
+        assert cue["category"] == "prosody"
+        assert cue["label"] == "volume_large"
+        assert cue["start"] == pytest.approx(0.6)
+        assert cue["end"] == pytest.approx(1.0)
         websocket.send_json({"type": "stop"})

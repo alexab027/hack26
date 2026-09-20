@@ -294,7 +294,7 @@ export default function HomePage() {
                     typeof globalThis.crypto?.randomUUID === "function"
                       ? globalThis.crypto.randomUUID()
                       : `semantic-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-                  semanticStream.start(sessionId);
+                  semanticStream.start(sessionId, { enableVolume: true });
                   setSemanticStatus("connected");
                 } catch (error) {
                   console.warn(

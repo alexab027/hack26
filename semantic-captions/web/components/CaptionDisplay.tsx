@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { mergeCues, standaloneCues } from "../captions/mergeCues";
+import {
+  mergeCues,
+  partitionAudioCues,
+  standaloneCues,
+  volumeStyleForSegment,
+} from "../captions/mergeCues";
 import type { AudioCue as AudioCueData, Transcript } from "../captions/types";
 import { AudioCue } from "./AudioCue";
 import { CaptionLine } from "./CaptionLine";
@@ -26,8 +31,9 @@ export function CaptionDisplay({
   const transcriptTimeline = interimTranscript
     ? [...transcripts, interimTranscript]
     : transcripts;
-  const mergedCaptions = mergeCues(transcriptTimeline, audioCues);
-  const unassociatedCues = standaloneCues(transcriptTimeline, audioCues);
+  const { volumeCues, visibleCues } = partitionAudioCues(audioCues);
+  const mergedCaptions = mergeCues(transcriptTimeline, visibleCues);
+  const unassociatedCues = standaloneCues(transcriptTimeline, visibleCues);
   const timeline = [
     ...mergedCaptions.map((caption) => ({
       kind: "transcript" as const,
@@ -65,6 +71,7 @@ export function CaptionDisplay({
                 key={item.key}
                 transcript={item.caption}
                 cues={item.caption.cues}
+                volumeStyle={volumeStyleForSegment(item.caption, volumeCues)}
                 speakerLabel={speakerLabel}
               />
             ) : (

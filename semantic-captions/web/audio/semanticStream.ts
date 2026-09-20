@@ -9,9 +9,13 @@ export type SemanticStreamHandlers = {
   onWarning(message: string): void;
 };
 
+export type SemanticStreamStartOptions = {
+  enableVolume?: boolean;
+};
+
 export interface SemanticStream {
   readonly sampleRate: number;
-  start(sessionId: string): void;
+  start(sessionId: string, options?: SemanticStreamStartOptions): void;
   stop(): void;
   close(): void;
 }
@@ -160,12 +164,17 @@ export async function prepareSemanticStream(
 
   return {
     sampleRate: context.sampleRate,
-    start(sessionId) {
+    start(sessionId, options) {
       if (socket.readyState !== WebSocket.OPEN) {
         throw new Error("Semantic backend is not connected.");
       }
       socket.send(
-        JSON.stringify({ type: "start", sample_rate: context.sampleRate, session_id: sessionId }),
+        JSON.stringify({
+          type: "start",
+          sample_rate: context.sampleRate,
+          session_id: sessionId,
+          ...(options?.enableVolume ? { enable_volume: true } : {}),
+        }),
       );
       sending = true;
       worklet?.port.postMessage({ type: "start" });

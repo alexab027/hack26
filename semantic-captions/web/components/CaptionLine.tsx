@@ -1,15 +1,21 @@
 import type { AudioCue as AudioCueData, Transcript } from "../captions/types";
+import {
+  CAPTION_VOLUME_TEXT_CLASSES,
+  type CaptionVolumeStyle,
+} from "../captions/mergeCues";
 import { AudioCue } from "./AudioCue";
 
 type CaptionLineProps = {
   transcript: Transcript;
   cues?: AudioCueData[];
+  volumeStyle?: CaptionVolumeStyle;
   speakerLabel?: string;
 };
 
 export function CaptionLine({
   transcript,
   cues = [],
+  volumeStyle = "normal",
   speakerLabel,
 }: CaptionLineProps) {
   return (
@@ -19,7 +25,9 @@ export function CaptionLine({
       <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-sky-300">
         {speakerLabel ?? `Speaker ${transcript.speaker}`}
       </p>
-      <p className="text-2xl leading-relaxed text-white sm:text-[2rem]">
+      <p
+        className={`${CAPTION_VOLUME_TEXT_CLASSES[volumeStyle]} leading-relaxed text-white`}
+      >
         {cues.map((cue) => (
           <AudioCue
             key={`${cue.category}-${cue.label}-${cue.start}-${cue.end}`}
