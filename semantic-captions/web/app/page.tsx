@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CaptionDisplay } from "../components/CaptionDisplay";
 import { EmotionAlerts } from "../components/EmotionAlerts";
+import { EmotionNotification } from "../components/EmotionNotification";
 import { CallLanding } from "../components/call/CallLanding";
 import { ListeningButton } from "../components/ListeningButton";
 import { ModeSelector, type AppMode } from "../components/ModeSelector";
@@ -19,6 +20,12 @@ import {
   prepareSemanticStream,
   type SemanticStream,
 } from "../audio/semanticStream";
+import {
+  startHumeExpressionAnalysis,
+  type HumeExpressionSession,
+  type HumeStatus,
+} from "../audio/humeExpression";
+import type { HumeExpressionAlert } from "../emotion/humeAlerts";
 
 type DeepgramStatus = "disconnected" | "connecting" | "connected";
 type SemanticStatus = "disconnected" | "connecting" | "connected" | "unavailable";
@@ -27,6 +34,7 @@ const MAX_FINAL_CAPTIONS = 100;
 const MAX_SEMANTIC_CUES = 200;
 const MAX_EMOTION_ALERTS = 3;
 const EMOTION_ALERT_DURATION_MS = 6000;
+const HUME_ALERT_DURATION_MS = 4000;
 
 export default function HomePage() {
   const [mode, setMode] = useState<AppMode>("nearby");
@@ -40,6 +48,8 @@ export default function HomePage() {
   const deepgramConnectionRef = useRef<DeepgramConnection | null>(null);
   const semanticStreamRef = useRef<SemanticStream | null>(null);
   const emotionAlertTimersRef = useRef<number[]>([]);
+  const humeSessionRef = useRef<HumeExpressionSession | null>(null);
+  const humeAlertTimerRef = useRef<number | null>(null);
   const deepgramAttemptRef = useRef(0);
   const mountedRef = useRef(false);
   const busyRef = useRef(false);
@@ -51,6 +61,8 @@ export default function HomePage() {
   const [interimCaption, setInterimCaption] = useState<Transcript | null>(null);
   const [audioCues, setAudioCues] = useState<AudioCue[]>([]);
   const [emotionAlerts, setEmotionAlerts] = useState<AudioCue[]>([]);
+  const [humeStatus, setHumeStatus] = useState<HumeStatus>("disconnected");
+  const [humeAlert, setHumeAlert] = useState<HumeExpressionAlert | null>(null);
 
   const clearRecording = () => {
     audioRef.current?.pause();
@@ -69,6 +81,12 @@ export default function HomePage() {
       deepgramConnectionRef.current = null;
       semanticStreamRef.current?.close();
       semanticStreamRef.current = null;
+      humeSessionRef.current?.stop();
+      humeSessionRef.current = null;
+      if (humeAlertTimerRef.current !== null) {
+        window.clearTimeout(humeAlertTimerRef.current);
+        humeAlertTimerRef.current = null;
+      }
       for (const timer of emotionAlertTimersRef.current) window.clearTimeout(timer);
       emotionAlertTimersRef.current = [];
       const recorder = recorderRef.current;
@@ -95,6 +113,14 @@ export default function HomePage() {
     connection?.close();
     semanticStreamRef.current?.close();
     semanticStreamRef.current = null;
+    humeSessionRef.current?.stop();
+    humeSessionRef.current = null;
+    setHumeStatus("disconnected");
+    setHumeAlert(null);
+    if (humeAlertTimerRef.current !== null) {
+      window.clearTimeout(humeAlertTimerRef.current);
+      humeAlertTimerRef.current = null;
+    }
     setDeepgramStatus("disconnected");
     setSemanticStatus("disconnected");
     setErrorMessage(message);
@@ -124,6 +150,14 @@ export default function HomePage() {
       setEmotionAlerts([]);
       for (const timer of emotionAlertTimersRef.current) window.clearTimeout(timer);
       emotionAlertTimersRef.current = [];
+      humeSessionRef.current?.stop();
+      humeSessionRef.current = null;
+      setHumeStatus("disconnected");
+      setHumeAlert(null);
+      if (humeAlertTimerRef.current !== null) {
+        window.clearTimeout(humeAlertTimerRef.current);
+        humeAlertTimerRef.current = null;
+      }
       semanticStreamRef.current?.stop();
       semanticStreamRef.current = null;
       const recorder = recorderRef.current;
@@ -152,6 +186,12 @@ export default function HomePage() {
     setEmotionAlerts([]);
     for (const timer of emotionAlertTimersRef.current) window.clearTimeout(timer);
     emotionAlertTimersRef.current = [];
+    setHumeStatus("connecting");
+    setHumeAlert(null);
+    if (humeAlertTimerRef.current !== null) {
+      window.clearTimeout(humeAlertTimerRef.current);
+      humeAlertTimerRef.current = null;
+    }
     setSemanticStatus("connecting");
     clearRecording();
     setRecording(null);
@@ -202,6 +242,9 @@ export default function HomePage() {
         deepgramConnectionRef.current = null;
         semanticStreamRef.current?.close();
         semanticStreamRef.current = null;
+        humeSessionRef.current?.stop();
+        humeSessionRef.current = null;
+        setHumeStatus("disconnected");
         setDeepgramStatus("disconnected");
         setSemanticStatus("disconnected");
         setInterimCaption(null);
@@ -216,6 +259,9 @@ export default function HomePage() {
         console.info("[Audio] recorder stopped");
         semanticStreamRef.current?.stop();
         semanticStreamRef.current = null;
+        humeSessionRef.current?.stop();
+        humeSessionRef.current = null;
+        setHumeStatus("disconnected");
         setSemanticStatus("disconnected");
         const connection = deepgramConnectionRef.current;
         deepgramConnectionRef.current = null;
@@ -296,6 +342,42 @@ export default function HomePage() {
           }
           return null;
         });
+      void startHumeExpressionAnalysis(stream, {
+        onStatus: (status) => {
+          if (mountedRef.current && deepgramAttemptRef.current === attempt) {
+            setHumeStatus(status);
+          }
+        },
+        onAlert: (alert) => {
+          if (!mountedRef.current || deepgramAttemptRef.current !== attempt) return;
+          if (humeAlertTimerRef.current !== null) {
+            window.clearTimeout(humeAlertTimerRef.current);
+          }
+          setHumeAlert(alert);
+          humeAlertTimerRef.current = window.setTimeout(() => {
+            setHumeAlert(null);
+            humeAlertTimerRef.current = null;
+          }, HUME_ALERT_DURATION_MS);
+        },
+        onWarning: (message) => {
+          console.warn(`[Hume] unavailable: ${message}`);
+        },
+      })
+        .then((session) => {
+          if (!mountedRef.current || deepgramAttemptRef.current !== attempt) {
+            session.stop();
+            return;
+          }
+          humeSessionRef.current = session;
+        })
+        .catch((error: unknown) => {
+          console.warn(
+            `[Hume] unavailable: ${error instanceof Error ? error.message : "unknown error"}`,
+          );
+          if (mountedRef.current && deepgramAttemptRef.current === attempt) {
+            setHumeStatus("unavailable");
+          }
+        });
       setIsListening(true);
 
       setDeepgramStatus("connecting");
@@ -334,7 +416,6 @@ export default function HomePage() {
                       : `semantic-${Date.now()}-${Math.random().toString(16).slice(2)}`;
                   semanticStream.start(sessionId, {
                     enableVolume: true,
-                    enableEmotion: true,
                   });
                   setSemanticStatus("connected");
                 } catch (error) {
@@ -391,6 +472,9 @@ export default function HomePage() {
       deepgramConnectionRef.current = null;
       semanticStreamRef.current?.close();
       semanticStreamRef.current = null;
+      humeSessionRef.current?.stop();
+      humeSessionRef.current = null;
+      setHumeStatus("disconnected");
       setDeepgramStatus("disconnected");
       setSemanticStatus("disconnected");
       setInterimCaption(null);
@@ -447,12 +531,18 @@ export default function HomePage() {
               <p aria-live="polite" className="mt-1 text-sm text-slate-300">
                 Sound labels: {semanticStatus === "connecting" ? "Connecting..." : semanticStatus === "connected" ? "Connected" : semanticStatus === "unavailable" ? "Unavailable (captions still active)" : "Disconnected"}
               </p>
+              {process.env.NODE_ENV !== "production" ? (
+                <p aria-live="polite" className="mt-1 text-sm text-slate-300">
+                  Hume: {humeStatus}
+                </p>
+              ) : null}
             </div>
           ) : null}
         </header>
 
         {mode === "nearby" ? (
           <>
+            <EmotionNotification alert={humeAlert} />
             <EmotionAlerts cues={emotionAlerts} />
             <section className="flex-1 rounded-3xl border border-slate-700 bg-slate-950/80 p-4">
               <CaptionDisplay
